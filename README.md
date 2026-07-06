@@ -8,8 +8,6 @@ boot, from booted systemd oneshots, reusing the proven Raspberry Pi helper scrip
 fallbacks. Arbitrary `runcmd`s run in two further phases (before and after the
 network is up).
 
-See [DESIGN.md](DESIGN.md) for the full design and rationale.
-
 ## Layout
 
 ```
