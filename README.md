@@ -53,3 +53,7 @@ test sandbox (no root, no real `/boot`):
 ## Status
 
 Prototype. Not yet production-hardened.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [`LICENSE`](LICENSE).
