@@ -107,6 +107,14 @@ EOF
     _tv_of=$(mktemp); printf 'config_version = "1.0"\n[wlan]\nssid = "SecNet"\nkey_mgmt = "wpa-psk"\n' >"$_tv_of"; toml_parse "$_tv_of"
     assert_fail "wpa-psk without password rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_of"
 
+    # ssid_hex: non-UTF-8 SSID carried as an even run of hex digits.
+    _tv_of=$(mktemp); printf 'config_version = "1.0"\n[wlan]\nssid_hex = "466f6ffe"\n' >"$_tv_of"; toml_parse "$_tv_of"
+    assert_ok "ssid_hex (open, valid hex) accepted" 'validate_config'; toml_cleanup; rm -f "$_tv_of"
+    _tv_of=$(mktemp); printf 'config_version = "1.0"\n[wlan]\nssid_hex = "466f6"\n' >"$_tv_of"; toml_parse "$_tv_of"
+    assert_fail "ssid_hex odd length rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_of"
+    _tv_of=$(mktemp); printf 'config_version = "1.0"\n[wlan]\nssid_hex = "zzzz"\n' >"$_tv_of"; toml_parse "$_tv_of"
+    assert_fail "ssid_hex non-hex rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_of"
+
     # Version policy: future major refused, future minor warned-but-ok.
     _tv_f6=$(mktemp); printf 'config_version = "2.0"\n' >"$_tv_f6"
     toml_parse "$_tv_f6"; assert_fail "future major refused" 'validate_version'; toml_cleanup

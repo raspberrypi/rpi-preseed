@@ -33,6 +33,7 @@ ssh.ssh_import_id               array                                           
 ssh.authorized_keys             array                                           pii
 
 wlan.ssid                       string                                          pii
+wlan.ssid_hex                   string                                          pii
 wlan.password                   string                                          secret
 wlan.password_encrypted         bool                                            plain
 wlan.hidden                     bool                                            plain

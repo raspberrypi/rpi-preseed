@@ -119,4 +119,49 @@ EOF
     assert_ncontains "open network has no wifi-security" "$_ti_nm" "wifi-security"
     assert_ncontains "open network has no psk" "$_ti_nm" "psk="
     rm -rf "$ROOT"
+
+    # --- Non-UTF-8 SSID via ssid_hex: NM byte-array, WPA2 (separate sandbox) ---
+    # "Foo" + a raw 0xfe octet -> 70;111;111;254; . Imager can't carry raw octets,
+    # so this must always take the native NM writer.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[wlan]
+ssid_hex = "466f6ffe"
+password = "hunter2hunter2"
+key_mgmt = "wpa-psk"
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_nm=$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)
+    assert_contains "hex ssid written as NM byte-array" "$_ti_nm" "ssid=70;111;111;254;"
+    assert_contains "hex ssid honours wpa-psk" "$_ti_nm" "key-mgmt=wpa-psk"
+    rm -rf "$ROOT"
+
+    # --- Wi-Fi country offline: regdomain persisted to cmdline.txt (separate) ---
+    # raspi-config can't run against a sandbox rootfs, so the country must still be
+    # applied via the kernel regdomain rather than silently reported as done.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    printf 'console=serial0,115200 root=PARTUUID=abcd rootwait\n' >"$ROOT/boot/firmware/cmdline.txt"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[wlan]
+ssid = "HomeNet"
+password = "hunter2hunter2"
+country = "GB"
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_cmd=$(cat "$ROOT/boot/firmware/cmdline.txt" 2>/dev/null)
+    assert_contains "wlan country persisted as kernel regdomain" "$_ti_cmd" "cfg80211.ieee80211_regdom=GB"
+    assert_contains "regdomain appended to existing single-line cmdline" "$_ti_cmd" "rootwait cfg80211.ieee80211_regdom=GB"
+    # Idempotent: a second explicit apply must not duplicate the parameter.
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_n=$(grep -o 'cfg80211.ieee80211_regdom=GB' "$ROOT/boot/firmware/cmdline.txt" | wc -l | tr -d ' ')
+    assert_eq "regdomain not duplicated on re-apply" "$_ti_n" "1"
+    rm -rf "$ROOT"
 }

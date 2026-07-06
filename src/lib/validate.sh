@@ -170,7 +170,20 @@ wlan_key_mgmt() {
 # validated by OCTET length so UTF-8 is allowed: wpa-psk is 8-63 octets (or a raw
 # 64-hex-char PMK); sae only needs to be non-empty. Encrypted PSKs pass through.
 _validate_wlan() {
-    toml_present wlan.ssid || return 0
+    # A non-UTF-8 SSID is carried hex-encoded in wlan.ssid_hex; it must be an
+    # even-length run of hex digits. Either ssid or ssid_hex enables wlan.
+    if toml_present wlan.ssid_hex; then
+        _vw_hex=$(toml_get wlan.ssid_hex)
+        case "$_vw_hex" in
+            ''|*[!0-9A-Fa-f]*)
+                log_error "config: wlan.ssid_hex must be hex digits"; return 1 ;;
+        esac
+        if [ $(( ${#_vw_hex} % 2 )) -ne 0 ]; then
+            log_error "config: wlan.ssid_hex must have an even number of digits"
+            return 1
+        fi
+    fi
+    toml_present wlan.ssid || toml_present wlan.ssid_hex || return 0
     _vw_km=$(wlan_key_mgmt)
 
     case "$_vw_km" in

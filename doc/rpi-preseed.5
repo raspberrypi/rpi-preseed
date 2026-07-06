@@ -34,8 +34,13 @@ The rename is performed before any login can start.
 .BR enabled ", " password_authentication " (bool), " ssh_import_id " (array), " authorized_keys " (array)."
 .TP
 .B [wlan]
-.BR ssid ", " password ", " password_encrypted ", " hidden ", " country ", " key_mgmt .
+.BR ssid ", " ssid_hex ", " password ", " password_encrypted ", " hidden ", " country ", " key_mgmt .
 Written as a NetworkManager preconfigured connection.
+.B ssid_hex
+carries a non-UTF-8 SSID as a hex string (an even run of hex digits) and takes
+precedence over
+.BR ssid ;
+it is always written via the native NetworkManager writer as a byte-array.
 .B key_mgmt
 is
 .BR none " (open), " owe " (WPA3 Enhanced Open), " wpa-psk

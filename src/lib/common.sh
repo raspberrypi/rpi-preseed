@@ -162,3 +162,20 @@ hash_password() {
 target_path() {
     printf '%s%s' "$RPI_PRESEED_ROOT" "$1"
 }
+
+# hex_to_nm_bytes HEX — convert a hex-encoded SSID to a NetworkManager keyfile
+# byte-array ("b1;b2;...;", decimal octets). Used for exotic, non-UTF-8 SSIDs
+# that cannot be represented as a UTF-8 TOML/keyfile string. Returns non-zero on
+# empty, odd-length or non-hex input.
+hex_to_nm_bytes() {
+    _hnb_h=$1
+    case "$_hnb_h" in ''|*[!0-9A-Fa-f]*) return 1 ;; esac
+    [ $(( ${#_hnb_h} % 2 )) -eq 0 ] || return 1
+    _hnb_out=""
+    while [ -n "$_hnb_h" ]; do
+        _hnb_pair=${_hnb_h%"${_hnb_h#??}"}   # leading two hex digits
+        _hnb_h=${_hnb_h#??}                  # remaining digits
+        _hnb_out="${_hnb_out}$(printf '%d' "0x$_hnb_pair");"
+    done
+    printf '%s' "$_hnb_out"
+}
