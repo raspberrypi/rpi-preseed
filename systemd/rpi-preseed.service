@@ -1,0 +1,20 @@
+[Unit]
+Description=rpi-preseed base configuration (first boot)
+Documentation=man:rpi-preseed(5)
+DefaultDependencies=yes
+After=local-fs.target systemd-sysusers.service systemd-tmpfiles-setup.service
+# Structural barrier: finish before any login surface can start a UID 1000 session.
+Before=systemd-user-sessions.service network-pre.target userconfig.service
+Before=getty.target getty@tty1.service serial-getty@ttyS0.service display-manager.service
+ConditionPathExists=/boot/firmware/rpi-preseed.toml
+ConditionPathExists=!/var/lib/rpi-preseed/applied
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Defense-in-depth: refuse to reconfigure a live user (e.g. a service run as UID 1000).
+ExecStartPre=/bin/sh -c 'if pgrep -u 1000 >/dev/null 2>&1; then echo "rpi-preseed: UID 1000 has live processes; refusing to reconfigure" >&2; exit 1; fi'
+ExecStart=/usr/bin/rpi-preseed apply-base
+
+[Install]
+WantedBy=multi-user.target

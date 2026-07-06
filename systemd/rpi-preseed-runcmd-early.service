@@ -1,0 +1,18 @@
+[Unit]
+Description=rpi-preseed early runcmds (pre-network)
+Documentation=man:rpi-preseed(5)
+After=rpi-preseed.service
+Before=network-pre.target
+ConditionPathExists=/var/lib/rpi-preseed/applied
+ConditionPathExists=!/var/lib/rpi-preseed/early-runcmd-done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Tight budget: user sessions wait on this phase (see user@.service drop-in).
+# Per-command timeouts inside the runner keep it fast; this is the hard backstop.
+TimeoutStartSec=30
+ExecStart=/usr/bin/rpi-preseed apply-runcmd-early
+
+[Install]
+WantedBy=multi-user.target

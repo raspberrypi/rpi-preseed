@@ -1,0 +1,101 @@
+.TH RPI-PRESEED 5 "2026" "rpi-preseed" "File Formats"
+.SH NAME
+rpi-preseed.toml \- first-boot OS customisation configuration for Raspberry Pi OS
+.SH SYNOPSIS
+.B /boot/firmware/rpi-preseed.toml
+.SH DESCRIPTION
+.B rpi-preseed
+reads a single TOML file on first boot and applies it from booted systemd
+oneshots, reusing the Raspberry Pi helper scripts with POSIX-shell fallbacks.
+The config location may be overridden with the kernel command line argument
+.BR rpi_preseed.config= .
+.PP
+Known keys are validated strictly; unknown keys and sections are ignored with a
+warning for forward compatibility. See
+.B config_version
+below.
+.SH SECTIONS
+.TP
+.B config_version
+Semantic version string "MAJOR.MINOR" (required). Major must match the tool's
+supported major; a higher minor produces a warning and best-effort application.
+.TP
+.B [system]
+.B hostname
+= string. Must be a valid RFC 1123 hostname (ASCII letters, digits and hyphens;
+each label 1-63 characters; no leading/trailing hyphen). Internationalised names
+are not supported.
+.TP
+.B [user]
+.BR name ", " password ", " password_encrypted " (bool), " passwordless_sudo " (bool)."
+The rename is performed before any login can start.
+.TP
+.B [ssh]
+.BR enabled ", " password_authentication " (bool), " ssh_import_id " (array), " authorized_keys " (array)."
+.TP
+.B [wlan]
+.BR ssid ", " password ", " password_encrypted ", " hidden ", " country ", " key_mgmt .
+Written as a NetworkManager preconfigured connection.
+.B key_mgmt
+is
+.BR none " (open), " owe " (WPA3 Enhanced Open), " wpa-psk
+(WPA2 and WPA2/WPA3 transition APs) or
+.BR sae " (WPA3-Personal only)."
+When omitted it defaults to
+.B wpa-psk
+if a password is given, otherwise
+.BR none .
+Open networks
+.RB ( none / owe )
+must not set a password; secured networks
+.RB ( wpa-psk / sae )
+require one.
+.B password
+may contain UTF-8 and is validated by octet length: for
+.B wpa-psk
+it must be 8-63 octets (or a raw 64-hex-digit PMK); for
+.B sae
+it need only be non-empty. Set
+.B password_encrypted
+to pass a pre-computed value through unchecked.
+.TP
+.B [locale]
+.BR keymap ", " timezone ", " locales " (array), " lang ", " lc_time ", " lc_measurement ", " keymap_model ", " keymap_variant ", " keymap_options " (array)."
+Exceeds Raspberry Pi Imager: full locale generation and XKB control.
+.TP
+.B [connect]
+.BR enabled ", " mode " (token|device-identity), " token .
+.B token
+is required if and only if
+.B mode
+is "token".
+.TP
+.B [interfaces]
+.BR i2c ", " spi ", " onewire " (bool), " serial " (enum), " usb_gadget " (bool)."
+.TP
+.B [boot]
+.BR config_txt " (array, appended to config.txt), " cmdline_txt " (string, appended to cmdline.txt)."
+.TP
+.B [runcmd]
+.B early
+(array) runs in the booted system before the network is up and is held to a
+tight budget \(em fast, local operations only. Commands slower than a few seconds
+belong in
+.BR late .
+.B late
+(array) runs after the network is up, behind a readiness gate (clock sync and
+apt/dpkg lock release) with per-command retry and backoff. Tunables:
+.BR early_cmd_timeout ", " late_require_time_sync ", " late_wait_for_apt_lock ", "
+.BR late_gate_timeout ", " late_retries ", " late_retry_delay ", " late_retry_max_delay .
+All commands run under continue-and-log.
+.SH FILES
+.TP
+.B /var/lib/rpi-preseed/
+Stamps (applied, early-runcmd-done, runcmd-done, apply-failed), logs, and report.json.
+.TP
+.B /boot/firmware/rpi-preseed/
+Redacted status breadcrumb and collect-logs bundles.
+.SH SEE ALSO
+.BR rpi-preseed (8)
+.SH NOTES
+Secrets are removed and PII is tokenised in all logs and diagnostics bundles.

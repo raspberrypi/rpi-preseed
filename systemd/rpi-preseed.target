@@ -1,0 +1,4 @@
+[Unit]
+Description=rpi-preseed first-boot customisation
+Documentation=man:rpi-preseed(5)
+Wants=rpi-preseed.service rpi-preseed-runcmd-early.service rpi-preseed-runcmd-late.service

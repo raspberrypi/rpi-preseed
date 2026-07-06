@@ -1,0 +1,326 @@
+#!/bin/sh
+# shellcheck shell=dash
+# rpi-preseed — first-boot OS customisation orchestrator + CLI.
+#
+# Subcommands:
+#   apply [--phase all|base|early|late]   apply now, ignoring stamps
+#   reset [--phase ...]                   clear stamps; re-run next boot
+#   status                                show applied state
+#   collect-logs [--include-runcmd-output] [--full]
+#   version
+# Internal (invoked by systemd units):
+#   apply-base | apply-runcmd-early | apply-runcmd-late
+
+RPI_PRESEED_VERSION="0.1.0-prototype"
+RPI_PRESEED_MAJOR=1
+RPI_PRESEED_MINOR=0
+export RPI_PRESEED_VERSION RPI_PRESEED_MAJOR RPI_PRESEED_MINOR
+
+# --- Locate code -------------------------------------------------------------
+_self=$(readlink -f "$0" 2>/dev/null || echo "$0")
+RPI_PRESEED_BASEDIR=$(cd -- "$(dirname -- "$_self")" && pwd)
+export RPI_PRESEED_BASEDIR
+if [ -d "$RPI_PRESEED_BASEDIR/lib" ]; then
+    : "${RPI_PRESEED_LIBDIR:=$RPI_PRESEED_BASEDIR/lib}"
+    : "${RPI_PRESEED_APPLYDIR:=$RPI_PRESEED_BASEDIR/apply}"
+else
+    : "${RPI_PRESEED_LIBDIR:=/usr/lib/rpi-preseed/lib}"
+    : "${RPI_PRESEED_APPLYDIR:=/usr/lib/rpi-preseed/apply}"
+fi
+
+# shellcheck source=src/lib/common.sh
+. "$RPI_PRESEED_LIBDIR/common.sh"
+# shellcheck source=src/lib/toml.sh
+. "$RPI_PRESEED_LIBDIR/toml.sh"
+# shellcheck source=src/lib/validate.sh
+. "$RPI_PRESEED_LIBDIR/validate.sh"
+# shellcheck source=src/lib/redact.sh
+. "$RPI_PRESEED_LIBDIR/redact.sh"
+# shellcheck source=src/lib/log.sh
+. "$RPI_PRESEED_LIBDIR/log.sh"
+for _m in system user ssh wlan locale interfaces connect boot runcmd; do
+    # shellcheck source=/dev/null
+    . "$RPI_PRESEED_APPLYDIR/$_m.sh"
+done
+
+# --- Config discovery --------------------------------------------------------
+locate_config() {
+    if [ -n "${RPI_PRESEED_CONFIG:-}" ]; then
+        [ -f "$RPI_PRESEED_CONFIG" ] && { printf '%s' "$RPI_PRESEED_CONFIG"; return 0; }
+        return 1
+    fi
+    # Kernel cmdline pointer (bare path only in this prototype).
+    if [ -r /proc/cmdline ]; then
+        _lc_ptr=$(tr ' ' '\n' </proc/cmdline | sed -n 's/^rpi_preseed\.config=//p' | head -n1)
+        if [ -n "$_lc_ptr" ]; then
+            case "$_lc_ptr" in
+                /*) [ -f "$_lc_ptr" ] && { printf '%s' "$_lc_ptr"; return 0; } ;;
+            esac
+        fi
+    fi
+    [ -f "$DEFAULT_CONFIG" ] && { printf '%s' "$DEFAULT_CONFIG"; return 0; }
+    [ -f "$LEGACY_CONFIG" ] && { printf '%s' "$LEGACY_CONFIG"; return 0; }
+    return 1
+}
+
+# --- Base configuration ------------------------------------------------------
+
+# do_base FORCE — apply base domains. FORCE=1 ignores stamps (manual apply).
+do_base() {
+    _db_force="$1"
+    _db_cfg=$(locate_config) || { echo "rpi-preseed: no config found; nothing to do" >&2; return 0; }
+    CONFIG_FINGERPRINT=$(config_fingerprint "$_db_cfg"); export CONFIG_FINGERPRINT
+
+    if [ "$_db_force" != 1 ]; then
+        if [ -f "$STAMP_APPLIED" ]; then
+            if [ "$(stamp_fingerprint "$STAMP_APPLIED")" = "$CONFIG_FINGERPRINT" ]; then
+                return 0
+            fi
+            echo "rpi-preseed: config changed since last apply; run 'rpi-preseed apply' to re-apply" >&2
+            return 0
+        fi
+        if [ -f "$STAMP_FAILED" ] && \
+           [ "$(stamp_fingerprint "$STAMP_FAILED")" = "$CONFIG_FINGERPRINT" ]; then
+            echo "rpi-preseed: previous apply of this config failed; fix it and run 'rpi-preseed apply'" >&2
+            return 0
+        fi
+    fi
+
+    ensure_dir "$STATE_DIR" 755
+    log_init base
+    log_info "applying base configuration from $_db_cfg (fingerprint ${CONFIG_FINGERPRINT})"
+
+    if ! toml_parse "$_db_cfg"; then
+        log_error "failed to parse config"; _base_fail; return 1
+    fi
+    redact_init
+    if ! validate_version; then _base_fail; toml_cleanup; return 1; fi
+    if ! validate_config; then
+        log_error "configuration invalid; refusing to apply"; _base_fail; toml_cleanup; return 1
+    fi
+
+    apply_system
+    apply_user
+    apply_ssh
+    apply_wlan
+    apply_locale
+    apply_interfaces
+    apply_connect
+    apply_boot
+
+    redact_config_secrets "$_db_cfg"
+    write_stamp "$STAMP_APPLIED"
+    rm -f "$STAMP_FAILED"
+    report_write applied
+    log_info "base configuration applied"
+    redact_cleanup; toml_cleanup; log_cleanup
+    return 0
+}
+
+_base_fail() {
+    write_stamp "$STAMP_FAILED"
+    report_write failed
+    redact_cleanup 2>/dev/null || true
+}
+
+# redact_config_secrets FILE — blank secret values in the config, if writable.
+redact_config_secrets() {
+    [ -w "$1" ] || { log_warn "config source read-only; skipping secret redaction"; return 0; }
+    sed -i -E 's/^([[:space:]]*)(password|token)([[:space:]]*=[[:space:]]*).*/\1\2\3"<redacted by rpi-preseed>"/' "$1" \
+        && log_info "redacted secrets in config source"
+}
+
+# --- Runcmd phases -----------------------------------------------------------
+
+# do_runcmd PHASE FORCE — run early|late phase.
+do_runcmd() {
+    _dr_phase="$1"; _dr_force="$2"
+    case "$_dr_phase" in early) _dr_stamp="$STAMP_EARLY" ;; late) _dr_stamp="$STAMP_LATE" ;; esac
+    _dr_cfg=$(locate_config) || return 0
+    CONFIG_FINGERPRINT=$(config_fingerprint "$_dr_cfg"); export CONFIG_FINGERPRINT
+
+    if [ "$_dr_force" != 1 ]; then
+        [ -f "$_dr_stamp" ] && return 0
+        [ -f "$STAMP_APPLIED" ] || { echo "rpi-preseed: base config not yet applied; skipping $_dr_phase runcmd" >&2; return 0; }
+    fi
+
+    ensure_dir "$STATE_DIR" 755
+    log_init "runcmd-$_dr_phase"
+    toml_parse "$_dr_cfg" || { log_error "failed to parse config"; return 1; }
+    redact_init
+    RUNCMD_OUT="$LOG_DIR/runcmd-$_dr_phase.out"; export RUNCMD_OUT
+    : >"$RUNCMD_OUT" 2>/dev/null || true
+
+    case "$_dr_phase" in
+        early) run_early ;;
+        late)  run_late ;;
+    esac
+
+    write_stamp "$_dr_stamp"
+    report_write "runcmd-$_dr_phase-done"
+    redact_cleanup; toml_cleanup; log_cleanup
+    return 0
+}
+
+# --- CLI subcommands ---------------------------------------------------------
+
+cmd_apply() {
+    _ca_phase=all
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --phase) _ca_phase="$2"; shift 2 ;;
+            --phase=*) _ca_phase="${1#--phase=}"; shift ;;
+            *) echo "apply: unknown arg: $1" >&2; return 2 ;;
+        esac
+    done
+    case "$_ca_phase" in
+        all)   do_base 1; do_runcmd early 1; do_runcmd late 1 ;;
+        base)  do_base 1 ;;
+        early) do_runcmd early 1 ;;
+        late)  do_runcmd late 1 ;;
+        *) echo "apply: invalid --phase: $_ca_phase" >&2; return 2 ;;
+    esac
+}
+
+cmd_reset() {
+    _cr_phase=all
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --phase) _cr_phase="$2"; shift 2 ;;
+            --phase=*) _cr_phase="${1#--phase=}"; shift ;;
+            *) echo "reset: unknown arg: $1" >&2; return 2 ;;
+        esac
+    done
+    case "$_cr_phase" in
+        all)   rm -f "$STAMP_APPLIED" "$STAMP_EARLY" "$STAMP_LATE" "$STAMP_FAILED" ;;
+        base)  rm -f "$STAMP_APPLIED" "$STAMP_FAILED" ;;
+        early) rm -f "$STAMP_EARLY" ;;
+        late)  rm -f "$STAMP_LATE" ;;
+        *) echo "reset: invalid --phase: $_cr_phase" >&2; return 2 ;;
+    esac
+    echo "rpi-preseed: cleared stamps for phase '$_cr_phase'; will re-run on next boot"
+    if helpers_live && have systemctl; then
+        systemctl enable rpi-preseed.service rpi-preseed-runcmd-early.service \
+            rpi-preseed-runcmd-late.service >/dev/null 2>&1 || true
+    fi
+}
+
+cmd_status() {
+    printf 'rpi-preseed %s\n' "$RPI_PRESEED_VERSION"
+    _cs_cfg=$(locate_config) && printf 'config:      %s (fingerprint %s)\n' \
+        "$_cs_cfg" "$(config_fingerprint "$_cs_cfg")" || printf 'config:      (none found)\n'
+    for _cs in "applied:$STAMP_APPLIED" "early:$STAMP_EARLY" "late:$STAMP_LATE" "failed:$STAMP_FAILED"; do
+        _cs_name=${_cs%%:*}; _cs_path=${_cs#*:}
+        if [ -f "$_cs_path" ]; then
+            printf '%-9s   done   (fingerprint %s)\n' "$_cs_name" "$(stamp_fingerprint "$_cs_path")"
+        else
+            printf '%-9s   -\n' "$_cs_name"
+        fi
+    done
+    [ -f "$STATE_DIR/report.json" ] && printf 'report:      %s\n' "$STATE_DIR/report.json"
+    return 0
+}
+
+cmd_collect_logs() {
+    _cl_full=0; _cl_runcmd=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --full) _cl_full=1; shift ;;
+            --include-runcmd-output) _cl_runcmd=1; shift ;;
+            *) echo "collect-logs: unknown arg: $1" >&2; return 2 ;;
+        esac
+    done
+    ensure_dir "$BREADCRUMB_DIR" 755 2>/dev/null || BREADCRUMB_DIR="$STATE_DIR"
+    _cl_ts=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || echo now)
+    _cl_stage=$(mktemp -d) || return 1
+
+    # Build the redaction table from the current config (if any).
+    _cl_cfg=$(locate_config) || _cl_cfg=""
+    if [ -n "$_cl_cfg" ]; then
+        toml_parse "$_cl_cfg" >/dev/null 2>&1 && redact_init
+    fi
+
+    # Environment snapshot.
+    {
+        printf 'rpi-preseed %s\n' "$RPI_PRESEED_VERSION"
+        printf 'date: %s\n' "$(date -u 2>/dev/null)"
+        printf 'uname: %s\n' "$(uname -a 2>/dev/null)"
+        printf '%s\n' '--- os-release ---'; cat /etc/os-release 2>/dev/null
+        printf '%s\n' '--- cmdline ---'; cat /proc/cmdline 2>/dev/null
+        printf '%s\n' '--- timedatectl ---'; timedatectl 2>/dev/null
+    } >"$_cl_stage/environment.txt"
+
+    # Logs + report (redacted unless --full).
+    ensure_dir "$_cl_stage/log" 755
+    if [ -d "$LOG_DIR" ]; then
+        for _cl_f in "$LOG_DIR"/*.log; do
+            [ -f "$_cl_f" ] || continue
+            _collect_file "$_cl_f" "$_cl_stage/log/$(basename "$_cl_f")" "$_cl_full"
+        done
+        if [ "$_cl_runcmd" -eq 1 ]; then
+            for _cl_f in "$LOG_DIR"/*.out; do
+                [ -f "$_cl_f" ] || continue
+                _collect_file "$_cl_f" "$_cl_stage/log/$(basename "$_cl_f")" "$_cl_full"
+            done
+        fi
+    fi
+    [ -f "$STATE_DIR/report.json" ] && _collect_file "$STATE_DIR/report.json" "$_cl_stage/report.json" "$_cl_full"
+
+    # Journal (booted only).
+    if have journalctl; then
+        journalctl -u 'rpi-preseed*' --no-pager >"$_cl_stage/journal.txt" 2>/dev/null || true
+        [ "$_cl_full" -eq 1 ] || _collect_file "$_cl_stage/journal.txt" "$_cl_stage/journal.txt" 0
+    fi
+
+    # Config copy (already redacted on-disk after success; redact again defensively).
+    if [ -n "$_cl_cfg" ]; then
+        _collect_file "$_cl_cfg" "$_cl_stage/config.toml" "$_cl_full"
+    fi
+
+    _cl_out="$BREADCRUMB_DIR/rpi-preseed-diag-$_cl_ts.tar.gz"
+    ( cd "$_cl_stage" && tar czf "$_cl_out" . ) 2>/dev/null
+    rm -rf "$_cl_stage"
+    redact_cleanup 2>/dev/null || true; toml_cleanup 2>/dev/null || true
+    [ "$_cl_full" -eq 1 ] && echo "WARNING: --full bundle is UNREDACTED; do not share externally." >&2
+    echo "$_cl_out"
+}
+
+# _collect_file SRC DST FULL — copy SRC to DST, redacting unless FULL=1.
+_collect_file() {
+    if [ "$3" -eq 1 ]; then
+        cp -f "$1" "$2" 2>/dev/null
+    else
+        redact_stream <"$1" >"$2" 2>/dev/null
+    fi
+}
+
+usage() {
+    cat <<EOF
+rpi-preseed $RPI_PRESEED_VERSION
+Usage:
+  rpi-preseed apply [--phase all|base|early|late]
+  rpi-preseed reset [--phase all|base|early|late]
+  rpi-preseed status
+  rpi-preseed collect-logs [--include-runcmd-output] [--full]
+  rpi-preseed version
+EOF
+}
+
+main() {
+    [ $# -ge 1 ] || { usage; exit 2; }
+    _cmd="$1"; shift
+    case "$_cmd" in
+        apply)             cmd_apply "$@" ;;
+        reset)             cmd_reset "$@" ;;
+        status)            cmd_status "$@" ;;
+        collect-logs)      cmd_collect_logs "$@" ;;
+        version|--version) echo "$RPI_PRESEED_VERSION" ;;
+        help|--help|-h)    usage ;;
+        apply-base)         do_base 0 ;;
+        apply-runcmd-early) do_runcmd early 0 ;;
+        apply-runcmd-late)  do_runcmd late 0 ;;
+        *) echo "rpi-preseed: unknown command: $_cmd" >&2; usage; exit 2 ;;
+    esac
+}
+
+main "$@"

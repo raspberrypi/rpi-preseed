@@ -1,0 +1,75 @@
+# rpi-preseed schema — single source of truth for known keys.
+#
+# Format (whitespace-separated columns):
+#   <dotted.key>   <type>   <class>   [flags]
+#
+# type:
+#   string                 free text
+#   bool                   true|false
+#   int                    non-negative integer
+#   array                  array of strings
+#   enum:a,b,c             one of the listed values
+# class (drives redaction — see DESIGN.md 12.6):
+#   secret                 removed entirely from all logs/bundles
+#   pii                    replaced with stable per-device salted-hash token
+#   plain                  kept verbatim
+# flags:
+#   required               must be present
+#
+# Unknown keys/sections not listed here are tolerated: warned once and skipped.
+
+config_version                  string                                          plain   required
+
+system.hostname                 string                                          pii
+
+user.name                       string                                          pii
+user.password                   string                                          secret
+user.password_encrypted         bool                                            plain
+user.passwordless_sudo          bool                                            plain
+
+ssh.enabled                     bool                                            plain
+ssh.password_authentication     bool                                            plain
+ssh.ssh_import_id               array                                           pii
+ssh.authorized_keys             array                                           pii
+
+wlan.ssid                       string                                          pii
+wlan.password                   string                                          secret
+wlan.password_encrypted         bool                                            plain
+wlan.hidden                     bool                                            plain
+wlan.country                    string                                          plain
+wlan.key_mgmt                   enum:none,owe,wpa-psk,sae                       plain
+
+locale.keymap                   string                                          plain
+locale.timezone                 string                                          plain
+locale.locales                  array                                           plain
+locale.lang                     string                                          plain
+locale.lc_time                  string                                          plain
+locale.lc_measurement           string                                          plain
+locale.keymap_model             string                                          plain
+locale.keymap_variant           string                                          plain
+locale.keymap_options           array                                           plain
+
+connect.enabled                 bool                                            plain
+connect.mode                    enum:token,device-identity                      plain
+connect.token                   string                                          secret
+
+interfaces.i2c                  bool                                            plain
+interfaces.spi                  bool                                            plain
+interfaces.onewire              bool                                            plain
+interfaces.serial               enum:off,default,console,hardware,console_hardware  plain
+interfaces.usb_gadget           bool                                            plain
+
+boot.config_txt                 array                                           plain
+boot.cmdline_txt                string                                          plain
+
+runcmd.early                    array                                           plain
+runcmd.late                     array                                           plain
+runcmd.early_cmd_timeout        int                                             plain
+runcmd.late_require_time_sync   bool                                            plain
+runcmd.late_wait_for_apt_lock   bool                                            plain
+runcmd.late_gate_timeout        int                                             plain
+runcmd.late_retries             int                                             plain
+runcmd.late_retry_delay         int                                             plain
+runcmd.late_retry_max_delay     int                                             plain
+
+debug                           bool                                            plain

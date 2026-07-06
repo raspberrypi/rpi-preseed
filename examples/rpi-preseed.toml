@@ -1,0 +1,53 @@
+config_version = "1.0"
+
+[system]
+hostname = "mypi"
+
+[user]
+name = "alice"
+password = "changeme"          # plaintext by default; hashed on-device
+password_encrypted = false
+passwordless_sudo = false
+
+[ssh]
+enabled = true
+password_authentication = false
+ssh_import_id = ["gh:alice"]
+authorized_keys = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexampleexampleexampleexample alice@laptop",
+]
+
+[wlan]
+ssid = "MyNetwork"
+password = "mywifipassphrase"
+password_encrypted = false
+hidden = false
+country = "GB"
+key_mgmt = "wpa-psk"   # none/owe (open), wpa-psk (WPA2), sae (WPA3); defaults by password
+# Open network: just set `ssid` and omit password/key_mgmt (or key_mgmt = "none").
+
+[locale]
+keymap = "gb"
+timezone = "Europe/London"
+locales = ["en_GB.UTF-8"]
+lang = "en_GB.UTF-8"
+lc_measurement = "en_GB.UTF-8"
+keymap_model = "pc105"
+keymap_options = ["ctrl:nocaps"]
+
+[connect]
+enabled = true
+mode = "device-identity"
+
+[interfaces]
+i2c = true
+spi = false
+serial = "console"
+
+[boot]
+config_txt = ["dtparam=audio=on"]
+
+[runcmd]
+early = ["systemctl enable my-service.service"]
+late = ["apt-get -y update"]
+late_retries = 3

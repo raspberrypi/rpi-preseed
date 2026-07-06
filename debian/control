@@ -1,0 +1,22 @@
+Source: rpi-preseed
+Section: admin
+Priority: optional
+Maintainer: Raspberry Pi OS Team <packages@raspberrypi.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: rpi-preseed
+Architecture: all
+Depends: ${misc:Depends}
+Recommends: raspberrypi-sys-mods, userconf-pi, raspi-config, network-manager, whois, rpi-usb-gadget
+Suggests: openssl
+Description: first-boot OS customisation for Raspberry Pi OS
+ rpi-preseed applies a single human-friendly TOML configuration file on first
+ boot, from booted systemd oneshots, reusing the Raspberry Pi helper scripts
+ (imager_custom, userconf, raspi-config nonint) with POSIX-shell fallbacks.
+ .
+ It supports the full Raspberry Pi Imager option surface plus arbitrary runcmds
+ in two phases (pre- and post-network), with idempotent run-once semantics,
+ secret/PII redaction, and a diagnostics collector. It is built into the image
+ in place of the classic firstrun.sh / userconfig.service flow.

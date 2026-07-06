@@ -1,0 +1,24 @@
+# Debian packaging build artifacts (dpkg-buildpackage / debuild / dh)
+/debian/rpi-preseed/
+/debian/.debhelper/
+/debian/tmp/
+/debian/files
+/debian/debhelper-build-stamp
+/debian/*.substvars
+/debian/*.debhelper
+/debian/*.debhelper.log
+/debian/*.log
+
+# Build products land in the parent dir, but ignore any that appear here too
+*.deb
+*.buildinfo
+*.changes
+*.dsc
+*.tar.gz
+*.tar.xz
+
+# Editor / OS cruft
+*~
+*.swp
+*.swo
+.DS_Store

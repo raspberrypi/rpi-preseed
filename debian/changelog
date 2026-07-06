@@ -1,0 +1,7 @@
+rpi-preseed (0.1.0) UNRELEASED; urgency=medium
+
+  * Initial prototype: TOML-driven first-boot customisation via booted systemd
+    oneshots, POSIX-shell parser/validator/redactor, per-domain appliers,
+    run-once semantics, diagnostics collector, and packaging.
+
+ -- Raspberry Pi OS Team <packages@raspberrypi.com>  Mon, 06 Jul 2026 11:00:00 +0000

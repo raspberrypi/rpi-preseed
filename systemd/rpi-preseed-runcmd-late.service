@@ -1,0 +1,19 @@
+[Unit]
+Description=rpi-preseed late runcmds (post-network)
+Documentation=man:rpi-preseed(5)
+After=rpi-preseed.service rpi-preseed-runcmd-early.service
+After=network-online.target time-sync.target
+After=packagekit.service
+Wants=network-online.target
+ConditionPathExists=/var/lib/rpi-preseed/applied
+ConditionPathExists=!/var/lib/rpi-preseed/runcmd-done
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# The late phase is allowed to wait patiently (gate + retries); nothing blocks on it.
+TimeoutStartSec=infinity
+ExecStart=/usr/bin/rpi-preseed apply-runcmd-late
+
+[Install]
+WantedBy=multi-user.target
