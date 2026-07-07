@@ -11,6 +11,12 @@ Architecture: all
 Depends: ${misc:Depends}
 Recommends: raspberrypi-sys-mods, userconf-pi, raspi-config, network-manager, whois, rpi-usb-gadget
 Suggests: openssl
+# rpi-preseed owns first-boot customisation in place of cloud-init, so the two
+# must never co-exist. A plain Conflicts is sufficient and correct here: it
+# forces apt to remove an installed cloud-init when rpi-preseed is installed.
+# (No Provides: nothing depends on cloud-init, and rpi-preseed does not
+# implement cloud-init's interfaces. No Replaces: the packages share no files.)
+Conflicts: cloud-init
 Description: first-boot OS customisation for Raspberry Pi OS
  rpi-preseed applies a single human-friendly TOML configuration file on first
  boot, from booted systemd oneshots, reusing the Raspberry Pi helper scripts
