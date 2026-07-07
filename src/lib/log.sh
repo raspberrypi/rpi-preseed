@@ -9,12 +9,28 @@ LOG_IDENT="rpi-preseed"
 LOG_PHASE="main"
 
 # log_init PHASE — start logging for a phase.
+#
+# The report scratch (REPORT_KEYS/REPORT_CMDS) is CUMULATIVE across the phases
+# of one apply run (base -> runcmd-early -> runcmd-late), which run as separate
+# processes on boot. Keeping it in STATE_DIR and appending means the final
+# report.json reflects the whole run rather than only the last phase (which was
+# previously empty). report_reset() clears it at the start of a fresh base apply.
 log_init() {
     LOG_PHASE="$1"
     ensure_dir "$LOG_DIR" 755 2>/dev/null || true
     LOG_FILE="$LOG_DIR/$LOG_PHASE.log"
-    REPORT_KEYS=$(mktemp 2>/dev/null || echo /tmp/rpp_keys.$$)
-    REPORT_CMDS=$(mktemp 2>/dev/null || echo /tmp/rpp_cmds.$$)
+    ensure_dir "$STATE_DIR" 755 2>/dev/null || true
+    REPORT_KEYS="$STATE_DIR/report.keys.tab"
+    REPORT_CMDS="$STATE_DIR/report.cmds.tab"
+    [ -f "$REPORT_KEYS" ] || : >"$REPORT_KEYS" 2>/dev/null || true
+    [ -f "$REPORT_CMDS" ] || : >"$REPORT_CMDS" 2>/dev/null || true
+}
+
+# report_reset — begin a fresh cumulative report. Called at the start of a base
+# apply so a re-apply (or a new config) does not accrete stale key results.
+report_reset() {
+    REPORT_KEYS="${REPORT_KEYS:-$STATE_DIR/report.keys.tab}"
+    REPORT_CMDS="${REPORT_CMDS:-$STATE_DIR/report.cmds.tab}"
     : >"$REPORT_KEYS" 2>/dev/null || true
     : >"$REPORT_CMDS" 2>/dev/null || true
 }
@@ -120,8 +136,11 @@ breadcrumb_write() {
     fi
 }
 
-# log_cleanup — remove report scratch files.
+# log_cleanup — end-of-phase cleanup.
+#
+# The report scratch is intentionally NOT removed here: it is cumulative across
+# phases and is reset by report_reset() at the next base apply. Removing it
+# would drop base-phase results before the runcmd phases re-render report.json.
 log_cleanup() {
-    [ -n "${REPORT_KEYS:-}" ] && rm -f "$REPORT_KEYS"
-    [ -n "${REPORT_CMDS:-}" ] && rm -f "$REPORT_CMDS"
+    :
 }

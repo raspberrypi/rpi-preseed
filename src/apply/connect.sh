@@ -21,8 +21,43 @@ apply_connect() {
         report_key connect.token applied
     fi
 
+    # Record whether the board already carries a firmware device-unique
+    # identity. Device-identity enrolment relies on this hardware key, so
+    # capturing its presence makes the report actionable ("enabled but no
+    # device key" explains why unattended enrolment did nothing).
+    _report_connect_device_identity
+
     if helpers_live && have rpi-connect; then
         rpi-connect on >/dev/null 2>&1 || true
     fi
     report_key connect.enabled applied "$_ac_mode"
+}
+
+# _report_connect_device_identity — report presence of the firmware
+# device-unique key (used by Raspberry Pi Connect device-identity enrolment),
+# probed with rpi-fw-crypto. Diagnostic only: never fails the apply.
+#
+# The device-unique key lives at key-id 1 and is flagged DEVICE in
+# `rpi-fw-crypto get-key-status`. We treat that flag as authoritative for "a
+# device identity is present", with a pubkey read-back as a fallback probe in
+# case the status text ever changes.
+_report_connect_device_identity() {
+    if ! helpers_live || ! have rpi-fw-crypto; then
+        report_key connect.device_identity unknown "rpi-fw-crypto unavailable"
+        return 0
+    fi
+
+    _rcdi_status=$(rpi-fw-crypto get-key-status 1 2>/dev/null || true)
+    case "$_rcdi_status" in
+        *DEVICE*)
+            report_key connect.device_identity present "fw-crypto key-id 1 (DEVICE)"
+            return 0
+            ;;
+    esac
+
+    if rpi-fw-crypto pubkey --key-id 1 >/dev/null 2>&1; then
+        report_key connect.device_identity present "fw-crypto key-id 1 (pubkey)"
+    else
+        report_key connect.device_identity absent "no fw-crypto device key"
+    fi
 }

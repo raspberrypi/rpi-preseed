@@ -88,6 +88,9 @@ do_base() {
 
     ensure_dir "$STATE_DIR" 755
     log_init base
+    # Base is the first phase of a run: start a fresh cumulative report so the
+    # runcmd phases append to (rather than overwrite) the base key results.
+    report_reset
     log_info "applying base configuration from $_db_cfg (fingerprint ${CONFIG_FINGERPRINT})"
 
     if ! toml_parse "$_db_cfg"; then

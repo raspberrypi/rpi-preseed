@@ -164,4 +164,31 @@ EOF
     _ti_n=$(grep -o 'cfg80211.ieee80211_regdom=GB' "$ROOT/boot/firmware/cmdline.txt" | wc -l | tr -d ' ')
     assert_eq "regdomain not duplicated on re-apply" "$_ti_n" "1"
     rm -rf "$ROOT"
+
+    # --- Report is cumulative across phases + Connect device-identity capture ---
+    # Regression: each phase used to overwrite report.json from fresh scratch, so
+    # the final (runcmd-late) artifact had empty keys. Base-phase keys must now
+    # survive into the last phase's report.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[system]
+hostname = "cumpi"
+[connect]
+enabled = true
+mode = "device-identity"
+[runcmd]
+late = ["true"]
+EOF
+    rpp apply >/dev/null 2>&1
+    _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    assert_contains "final report is the runcmd-late phase" "$_ti_rep" '"phase": "runcmd-late"'
+    assert_contains "base key survives into final report" "$_ti_rep" "connect.enabled"
+    assert_contains "connect device-identity captured in report" "$_ti_rep" "connect.device_identity"
+    # The sandbox has no firmware crypto service, so identity state is 'unknown'.
+    assert_contains "device-identity unknown without rpi-fw-crypto" "$_ti_rep" "rpi-fw-crypto unavailable"
+    rm -rf "$ROOT"
 }
