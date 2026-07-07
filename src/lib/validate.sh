@@ -120,6 +120,8 @@ _validate_combos() {
         _validate_hostname || _vco_ok=1
     fi
     _validate_wlan || _vco_ok=1
+    _validate_ethernet || _vco_ok=1
+    _validate_mounts || _vco_ok=1
 
     # locale.lang / lc_* should be members of locale.locales (if locales given).
     if toml_present locale.locales; then
@@ -219,6 +221,53 @@ _validate_wlan() {
                 return 1
             fi ;;
     esac
+    return 0
+}
+
+# _validate_ethernet — wired connection consistency. A static address is required
+# for method=static; address/gateway/dns are meaningless for dhcp/disabled.
+_validate_ethernet() {
+    toml_present ethernet.method || toml_present ethernet.address \
+        || toml_present ethernet.interface || return 0
+    _ve_method=$(toml_get_default ethernet.method dhcp)
+    _ve_ok=0
+
+    case "$_ve_method" in
+        static)
+            if ! toml_present ethernet.address; then
+                log_error "config: ethernet.method='static' requires ethernet.address"
+                _ve_ok=1
+            else
+                _ve_addr=$(toml_get ethernet.address)
+                # Light sanity: IPv4 dotted-quad with a CIDR prefix (a.b.c.d/n).
+                if ! printf '%s' "$_ve_addr" | LC_ALL=C grep -Eq \
+                    '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'; then
+                    log_error "config: ethernet.address must be IPv4 CIDR notation (e.g. 192.168.1.50/24): '$_ve_addr'"
+                    _ve_ok=1
+                fi
+            fi ;;
+        dhcp|disabled)
+            for _ve_k in ethernet.address ethernet.gateway ethernet.dns ethernet.dns_search; do
+                if toml_present "$_ve_k"; then
+                    log_error "config: $_ve_k is only valid with ethernet.method='static' (method=$_ve_method)"
+                    _ve_ok=1
+                fi
+            done ;;
+    esac
+    return "$_ve_ok"
+}
+
+# _validate_mounts — warn on obviously malformed fstab lines (fewer than 4 fields).
+# Non-fatal: a surprising line should not block the whole apply.
+_validate_mounts() {
+    toml_present mounts.fstab || return 0
+    toml_array mounts.fstab | while IFS= read -r _vm_line; do
+        [ -n "$_vm_line" ] || continue
+        _vm_n=$(printf '%s\n' "$_vm_line" | awk '{print NF}')
+        if [ "$_vm_n" -lt 4 ]; then
+            log_warn "config: mounts.fstab entry looks malformed (needs at least 4 fields): '$_vm_line'"
+        fi
+    done
     return 0
 }
 

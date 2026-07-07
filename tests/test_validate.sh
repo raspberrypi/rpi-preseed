@@ -115,6 +115,20 @@ EOF
     _tv_of=$(mktemp); printf 'config_version = "1.0"\n[wlan]\nssid_hex = "zzzz"\n' >"$_tv_of"; toml_parse "$_tv_of"
     assert_fail "ssid_hex non-hex rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_of"
 
+    # Ethernet: static requires a CIDR address; dhcp/disabled reject IP settings.
+    _tv_ef=$(mktemp); printf 'config_version = "1.1"\n[ethernet]\nmethod = "static"\n' >"$_tv_ef"; toml_parse "$_tv_ef"
+    assert_fail "ethernet static without address rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_ef"
+    _tv_ef=$(mktemp); printf 'config_version = "1.1"\n[ethernet]\nmethod = "static"\naddress = "192.168.1.50/24"\ngateway = "192.168.1.1"\n' >"$_tv_ef"; toml_parse "$_tv_ef"
+    assert_ok "ethernet static with CIDR address accepted" 'validate_config'; toml_cleanup; rm -f "$_tv_ef"
+    _tv_ef=$(mktemp); printf 'config_version = "1.1"\n[ethernet]\nmethod = "static"\naddress = "192.168.1.50"\n' >"$_tv_ef"; toml_parse "$_tv_ef"
+    assert_fail "ethernet static address without prefix rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_ef"
+    _tv_ef=$(mktemp); printf 'config_version = "1.1"\n[ethernet]\nmethod = "dhcp"\naddress = "192.168.1.50/24"\n' >"$_tv_ef"; toml_parse "$_tv_ef"
+    assert_fail "ethernet dhcp with address rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_ef"
+    _tv_ef=$(mktemp); printf 'config_version = "1.1"\n[ethernet]\nmethod = "disabled"\n' >"$_tv_ef"; toml_parse "$_tv_ef"
+    assert_ok "ethernet disabled accepted" 'validate_config'; toml_cleanup; rm -f "$_tv_ef"
+    _tv_ef=$(mktemp); printf 'config_version = "1.1"\n[ethernet]\nmethod = "bogus"\n' >"$_tv_ef"; toml_parse "$_tv_ef"
+    assert_fail "ethernet invalid method rejected" 'validate_config'; toml_cleanup; rm -f "$_tv_ef"
+
     # Version policy: future major refused, future minor warned-but-ok.
     _tv_f6=$(mktemp); printf 'config_version = "2.0"\n' >"$_tv_f6"
     toml_parse "$_tv_f6"; assert_fail "future major refused" 'validate_version'; toml_cleanup

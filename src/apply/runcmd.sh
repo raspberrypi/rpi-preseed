@@ -101,10 +101,16 @@ _backoff() {
     echo $((_bo_d + _bo_j))
 }
 
-# run_late — execute [runcmd].late behind the gate with retry/backoff.
+# run_late — apply [packages] then execute [runcmd].late behind the gate.
 run_late() {
+    _rl_have_pkgs=0
+    if toml_present packages.install || toml_present packages.remove \
+       || toml_bool packages.update false || toml_bool packages.upgrade false; then
+        _rl_have_pkgs=1
+    fi
+
     _rl_tmp=$(mktemp); toml_array runcmd.late >"$_rl_tmp"
-    if [ ! -s "$_rl_tmp" ]; then rm -f "$_rl_tmp"; return 0; fi
+    if [ "$_rl_have_pkgs" -eq 0 ] && [ ! -s "$_rl_tmp" ]; then rm -f "$_rl_tmp"; return 0; fi
 
     _late_gate
 
@@ -116,6 +122,11 @@ run_late() {
     export DEBIAN_FRONTEND=noninteractive
     _rl_apt_opt="-o DPkg::Lock::Timeout=300"
     export APT_LOCK_TIMEOUT_OPT="$_rl_apt_opt"
+
+    # Declarative packages run before late runcmds so commands can rely on them.
+    [ "$_rl_have_pkgs" -eq 1 ] && apply_packages
+
+    if [ ! -s "$_rl_tmp" ]; then rm -f "$_rl_tmp"; return 0; fi
 
     _rl_idx=0
     while IFS= read -r _rl_cmd; do

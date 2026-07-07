@@ -13,7 +13,7 @@
 
 RPI_PRESEED_VERSION="0.1.0-prototype"
 RPI_PRESEED_MAJOR=1
-RPI_PRESEED_MINOR=0
+RPI_PRESEED_MINOR=1
 export RPI_PRESEED_VERSION RPI_PRESEED_MAJOR RPI_PRESEED_MINOR
 
 # --- Locate code -------------------------------------------------------------
@@ -38,7 +38,7 @@ fi
 . "$RPI_PRESEED_LIBDIR/redact.sh"
 # shellcheck source=src/lib/log.sh
 . "$RPI_PRESEED_LIBDIR/log.sh"
-for _m in system user ssh wlan locale interfaces connect boot runcmd; do
+for _m in system user ssh wlan ethernet locale time certs mounts interfaces connect boot packages runcmd; do
     # shellcheck source=/dev/null
     . "$RPI_PRESEED_APPLYDIR/$_m.sh"
 done
@@ -106,7 +106,11 @@ do_base() {
     apply_user
     apply_ssh
     apply_wlan
+    apply_ethernet
     apply_locale
+    apply_time
+    apply_certs
+    apply_mounts
     apply_interfaces
     apply_connect
     apply_boot

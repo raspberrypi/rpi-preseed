@@ -73,9 +73,36 @@ it need only be non-empty. Set
 .B password_encrypted
 to pass a pre-computed value through unchecked.
 .TP
+.B [ethernet]
+.BR method " (dhcp|static|disabled), " address ", " gateway ", " dns " (array), " dns_search " (array), " interface .
+A single wired connection written as a NetworkManager keyfile.
+.B method
+defaults to
+.BR dhcp .
+.B static
+requires
+.B address
+in IPv4 CIDR notation (e.g.
+.IR 192.168.1.50/24 );
+.BR gateway ", " dns " and " dns_search
+are only valid with
+.BR static .
+.B interface
+optionally binds the profile to a named device (e.g.
+.IR eth0 ).
+.TP
 .B [locale]
 .BR keymap ", " timezone ", " locales " (array), " lang ", " lc_time ", " lc_measurement ", " keymap_model ", " keymap_variant ", " keymap_options " (array)."
 Exceeds Raspberry Pi Imager: full locale generation and XKB control.
+.TP
+.B [time]
+.BR ntp " (array), " fallback_ntp " (array)."
+NTP server lists written as a
+.B systemd-timesyncd
+drop-in
+.RB ( /etc/systemd/timesyncd.conf.d/10-rpi-preseed.conf ).
+The timezone is set via
+.BR [locale].timezone .
 .TP
 .B [connect]
 .BR enabled ", " mode " (token|device-identity), " token .
@@ -86,6 +113,23 @@ is "token".
 .TP
 .B [interfaces]
 .BR i2c ", " spi ", " onewire " (bool), " serial " (enum), " usb_gadget " (bool)."
+.TP
+.B [ca_certificates]
+.B files
+(array). Extra trusted CA certificates referenced by file. Each name is resolved
+next to the config on the boot partition (or as an absolute path), staged into
+.IR /usr/local/share/ca-certificates ", and registered with"
+.BR update-ca-certificates .
+A PEM cannot be embedded inline because the config format carries no newlines.
+.TP
+.B [mounts]
+.B fstab
+(array). Each entry is a complete
+.BR fstab (5)
+line
+.RB ( "<spec> <mountpoint> <fstype> <options> <dump> <pass>" ).
+Lines are appended idempotently and the mountpoint directory is created; mounts
+take effect on the next boot.
 .TP
 .B [boot]
 .BR config_txt " (array, appended to config.txt), " cmdline_txt " (string, appended to cmdline.txt)."
@@ -102,6 +146,24 @@ apt/dpkg lock release) with per-command retry and backoff. Tunables:
 .BR early_cmd_timeout ", " late_require_time_sync ", " late_wait_for_apt_lock ", "
 .BR late_gate_timeout ", " late_retries ", " late_retry_delay ", " late_retry_max_delay .
 All commands run under continue-and-log.
+.TP
+.B [packages]
+.BR update " (bool), " upgrade " (bool), " install " (array), " remove " (array)."
+Declarative
+.BR apt-get
+package management, applied in the late phase (post-network, behind the same
+readiness gate as
+.BR [runcmd].late )
+and before late commands, so those commands may rely on the installed packages.
+.B update
+refreshes the index (also implied by
+.BR install / upgrade );
+.B upgrade
+performs a
+.BR "dist-upgrade" .
+Each step is retried with backoff using the
+.B late_retry_*
+tunables.
 .SH FILES
 .TP
 .B /var/lib/rpi-preseed/

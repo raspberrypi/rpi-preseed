@@ -240,4 +240,86 @@ EOF
     assert_contains "groups apply without a rename" \
         "$(cat "$ROOT/etc/group" 2>/dev/null)" "sudo:x:27:pi"
     rm -rf "$ROOT"
+
+    # --- Ethernet: static + dhcp NetworkManager keyfiles (separate sandbox) ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.1"
+[ethernet]
+method = "static"
+address = "192.168.1.50/24"
+gateway = "192.168.1.1"
+dns = ["192.168.1.1", "1.1.1.1"]
+interface = "eth0"
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_eth=$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection" 2>/dev/null)
+    assert_contains "ethernet keyfile is wired type" "$_ti_eth" "type=ethernet"
+    assert_contains "ethernet binds named interface" "$_ti_eth" "interface-name=eth0"
+    assert_contains "ethernet static method" "$_ti_eth" "method=manual"
+    assert_contains "ethernet static address+gateway" "$_ti_eth" "address1=192.168.1.50/24,192.168.1.1"
+    assert_contains "ethernet dns list" "$_ti_eth" "dns=192.168.1.1;1.1.1.1;"
+    rm -rf "$ROOT"
+
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    printf 'config_version = "1.1"\n[ethernet]\nmethod = "dhcp"\n' >"$CFG"
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "ethernet dhcp method auto" \
+        "$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection" 2>/dev/null)" "method=auto"
+    rm -rf "$ROOT"
+
+    # --- CA certs / NTP / mounts base-phase appliers (separate sandbox) ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    printf -- '-----BEGIN CERTIFICATE-----\nMIIfake\n-----END CERTIFICATE-----\n' >"$ROOT/boot/firmware/corp-root-ca.crt"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.1"
+[time]
+ntp = ["time.cloudflare.com"]
+fallback_ntp = ["0.debian.pool.ntp.org"]
+[ca_certificates]
+files = ["corp-root-ca.crt", "missing.crt"]
+[mounts]
+fstab = ["LABEL=DATA /data ext4 defaults,nofail 0 2"]
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "timesyncd NTP written" \
+        "$(cat "$ROOT/etc/systemd/timesyncd.conf.d/10-rpi-preseed.conf" 2>/dev/null)" "NTP=time.cloudflare.com"
+    assert_contains "timesyncd FallbackNTP written" \
+        "$(cat "$ROOT/etc/systemd/timesyncd.conf.d/10-rpi-preseed.conf" 2>/dev/null)" "FallbackNTP=0.debian.pool.ntp.org"
+    assert_file "CA cert staged for update-ca-certificates" "$ROOT/usr/local/share/ca-certificates/corp-root-ca.crt"
+    assert_contains "missing CA cert reported skipped" \
+        "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" "missing.crt"
+    assert_contains "fstab entry appended" "$(cat "$ROOT/etc/fstab" 2>/dev/null)" "LABEL=DATA /data ext4"
+    if [ -d "$ROOT/data" ]; then ok "fstab mountpoint dir created"; else no "fstab mountpoint dir created"; fi
+    # Idempotent: re-apply must not duplicate the fstab line.
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_n=$(grep -c 'LABEL=DATA /data ext4' "$ROOT/etc/fstab" 2>/dev/null | tr -d ' ')
+    assert_eq "fstab line not duplicated on re-apply" "$_ti_n" "1"
+    rm -rf "$ROOT"
+
+    # --- Packages: sandbox has no apt-get, so the request is reported skipped ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.1"
+[packages]
+update = true
+install = ["vim", "htop"]
+EOF
+    rpp apply --phase late >/dev/null 2>&1
+    assert_file "late stamp written for packages-only config" "$ROOT/var/lib/rpi-preseed/runcmd-done"
+    assert_contains "packages reported skipped without apt-get" \
+        "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" "apt-get unavailable"
+    rm -rf "$ROOT"
 }

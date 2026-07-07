@@ -1,4 +1,4 @@
-config_version = "1.0"
+config_version = "1.1"
 
 [system]
 hostname = "mypi"
@@ -28,6 +28,13 @@ country = "GB"
 key_mgmt = "wpa-psk"   # none/owe (open), wpa-psk (WPA2), sae (WPA3); defaults by password
 # Open network: just set `ssid` and omit password/key_mgmt (or key_mgmt = "none").
 
+[ethernet]
+method = "static"          # dhcp (default) | static | disabled
+address = "192.168.1.50/24"
+gateway = "192.168.1.1"
+dns = ["192.168.1.1", "1.1.1.1"]
+# interface = "eth0"        # optional; bind to a named device
+
 [locale]
 keymap = "gb"
 timezone = "Europe/London"
@@ -36,6 +43,18 @@ lang = "en_GB.UTF-8"
 lc_measurement = "en_GB.UTF-8"
 keymap_model = "pc105"
 keymap_options = ["ctrl:nocaps"]
+
+[time]
+ntp = ["time.cloudflare.com"]
+fallback_ntp = ["0.debian.pool.ntp.org", "1.debian.pool.ntp.org"]
+
+[ca_certificates]
+# Files sit next to this config on the boot partition (or use absolute paths).
+files = ["corp-root-ca.crt"]
+
+[mounts]
+# Full fstab lines: <spec> <mountpoint> <fstype> <options> <dump> <pass>
+fstab = ["LABEL=DATA  /data  ext4  defaults,nofail  0  2"]
 
 [connect]
 enabled = true
@@ -49,7 +68,13 @@ serial = "console"
 [boot]
 config_txt = ["dtparam=audio=on"]
 
+[packages]
+update = true
+install = ["vim", "htop"]
+# upgrade = true          # dist-upgrade on first boot
+# remove = ["nano"]
+
 [runcmd]
 early = ["systemctl enable my-service.service"]
-late = ["apt-get -y update"]
+late = ["systemctl enable --now htop.service"]
 late_retries = 3

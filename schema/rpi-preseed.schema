@@ -55,6 +55,25 @@ connect.enabled                 bool                                            
 connect.mode                    enum:token,device-identity                      plain
 connect.token                   string                                          secret
 
+ethernet.method                 enum:dhcp,static,disabled                       plain
+ethernet.address                string                                          plain
+ethernet.gateway                string                                          plain
+ethernet.dns                    array                                           plain
+ethernet.dns_search             array                                           plain
+ethernet.interface              string                                          plain
+
+packages.update                 bool                                            plain
+packages.upgrade                bool                                            plain
+packages.install                array                                           plain
+packages.remove                 array                                           plain
+
+ca_certificates.files           array                                           plain
+
+time.ntp                        array                                           plain
+time.fallback_ntp               array                                           plain
+
+mounts.fstab                    array                                           plain
+
 interfaces.i2c                  bool                                            plain
 interfaces.spi                  bool                                            plain
 interfaces.onewire              bool                                            plain
