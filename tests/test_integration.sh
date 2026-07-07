@@ -191,4 +191,53 @@ EOF
     # The sandbox has no firmware crypto service, so identity state is 'unknown'.
     assert_contains "device-identity unknown without rpi-fw-crypto" "$_ti_rep" "rpi-fw-crypto unavailable"
     rm -rf "$ROOT"
+
+    # --- Supplementary groups: rename + add to sudo, preserve/skip correctly ---
+    # Imager grants the operator real privileges by listing groups (esp. 'sudo').
+    # Membership is append-only; a non-existent group is skipped, not fatal.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    cat >"$ROOT/etc/group" <<'EOF'
+root:x:0:
+sudo:x:27:alice
+plugdev:x:46:
+EOF
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[user]
+name = "operator"
+groups = ["sudo", "plugdev", "nosuchgroup"]
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_grp=$(cat "$ROOT/etc/group" 2>/dev/null)
+    assert_eq "renamed user landed in passwd" \
+        "$(awk -F: '$3==1000{print $1}' "$ROOT/etc/passwd")" "operator"
+    assert_contains "operator added to sudo group" "$_ti_grp" "sudo:x:27:alice,operator"
+    assert_contains "operator added to plugdev group" "$_ti_grp" "plugdev:x:46:operator"
+    _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    assert_contains "groups applied reported" "$_ti_rep" "sudo,plugdev"
+    assert_contains "missing group skipped in report" "$_ti_rep" "nosuchgroup"
+    # Idempotent: a second apply must not duplicate the membership.
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_n=$(awk -F: '$1=="sudo"{print $4}' "$ROOT/etc/group" | grep -o 'operator' | wc -l | tr -d ' ')
+    assert_eq "sudo membership not duplicated on re-apply" "$_ti_n" "1"
+    rm -rf "$ROOT"
+
+    # --- Groups without a rename: apply to the current UID 1000 account ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    printf 'sudo:x:27:\n' >"$ROOT/etc/group"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[user]
+groups = ["sudo"]
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "groups apply without a rename" \
+        "$(cat "$ROOT/etc/group" 2>/dev/null)" "sudo:x:27:pi"
+    rm -rf "$ROOT"
 }

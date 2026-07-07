@@ -26,6 +26,7 @@ user.name                       string                                          
 user.password                   string                                          secret
 user.password_encrypted         bool                                            plain
 user.passwordless_sudo          bool                                            plain
+user.groups                     array                                           plain
 
 ssh.enabled                     bool                                            plain
 ssh.password_authentication     bool                                            plain

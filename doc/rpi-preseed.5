@@ -27,8 +27,17 @@ each label 1-63 characters; no leading/trailing hyphen). Internationalised names
 are not supported.
 .TP
 .B [user]
-.BR name ", " password ", " password_encrypted " (bool), " passwordless_sudo " (bool)."
+.BR name ", " password ", " password_encrypted " (bool), " passwordless_sudo " (bool), " groups " (array)."
 The rename is performed before any login can start.
+.B groups
+lists supplementary groups to add the primary (UID 1000) account to; membership is
+append-only, so existing groups are preserved. Most notably, listing
+.B sudo
+grants the account the ability to run
+.BR sudo " (still password-gated); use " passwordless_sudo
+for an unprompted sudoers drop-in. Groups that do not exist on the image are
+warned and skipped rather than failing the apply. Groups and sudo are applied to
+the effective account even when no rename or password is configured.
 .TP
 .B [ssh]
 .BR enabled ", " password_authentication " (bool), " ssh_import_id " (array), " authorized_keys " (array)."

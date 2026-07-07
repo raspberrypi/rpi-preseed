@@ -8,6 +8,8 @@ name = "alice"
 password = "changeme"          # plaintext by default; hashed on-device
 password_encrypted = false
 passwordless_sudo = false
+groups = ["sudo"]              # extra groups for the UID 1000 account (append-only);
+                               # 'sudo' grants the account `sudo`. Missing groups are skipped.
 
 [ssh]
 enabled = true
