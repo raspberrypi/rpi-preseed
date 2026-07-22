@@ -29,34 +29,39 @@ _qemu_provision_stamp_key() {
     } | sha256sum | awk '{print $1}'
 }
 
-# _qemu_install_virt_modules ROOTFS_MNT — copy minimal host modules so guest can mount vfat.
-# Full module trees do not fit on an ungrown Pi OS Lite rootfs.
+# _qemu_install_virt_modules ROOTFS_MNT — replace the guest's kernel modules with
+# the boot kernel's full module tree, so it can load anything Pi OS probes at boot
+# (vfat/nls for /boot/firmware, and everything else) under -M virt.
+#
+# We boot a different kernel (host Debian, or the auto-fetched one) than the Pi
+# kernel the rootfs shipped, so /lib/modules/<pi-uname> is dead weight for a wrong
+# uname. Deleting it (64M) frees room for the boot kernel's full tree (~166M) on
+# the tight, ungrowable Pi OS Lite rootfs (host e2fsprogs 1.46 can't resize the
+# trixie ext4). QEMU_KERNEL_MODULES already carries depmod-generated dep tables.
 _qemu_install_virt_modules() {
     _qiv_mnt="$1"
-    [ -n "${QEMU_KERNEL:-}" ] || return 0
-    _qiv_ver=$(basename -- "$QEMU_KERNEL" | sed 's/^vmlinuz-//')
-    _qiv_src="/lib/modules/$_qiv_ver"
-    if [ ! -d "$_qiv_src" ]; then
-        qemu_warn "no $_qiv_src; /boot/firmware may fail to mount under -M virt"
+    _qiv_ver="${QEMU_KERNEL_UNAME:-}"
+    _qiv_src="${QEMU_KERNEL_MODULES:-}"
+    if [ -z "$_qiv_ver" ] || [ -z "$_qiv_src" ] || [ ! -d "$_qiv_src" ]; then
+        qemu_warn "no module tree for kernel ${_qiv_ver:-?}; /boot/firmware may fail to mount under -M virt"
         return 0
     fi
-    qemu_info "installing minimal host modules $_qiv_ver into guest (fat/vfat/nls)..."
-    _qiv_dst="$_qiv_mnt/lib/modules/$_qiv_ver"
-    mkdir -p "$_qiv_dst/kernel/fs/fat" "$_qiv_dst/kernel/fs/nls"
-    for _qiv_rel in \
-        kernel/fs/fat/fat.ko.xz \
-        kernel/fs/fat/vfat.ko.xz \
-        kernel/fs/nls/nls_cp437.ko.xz \
-        kernel/fs/nls/nls_ascii.ko.xz \
-        modules.dep modules.dep.bin modules.alias modules.alias.bin \
-        modules.symbols modules.symbols.bin modules.builtin modules.builtin.bin \
-        modules.softdep modules.devname
-    do
-        if [ -e "$_qiv_src/$_qiv_rel" ]; then
-            mkdir -p "$_qiv_dst/$(dirname -- "$_qiv_rel")"
-            cp -a "$_qiv_src/$_qiv_rel" "$_qiv_dst/$_qiv_rel"
-        fi
-    done
+
+    # Drop the shipped (wrong-uname) modules to make space, then install the boot
+    # kernel's tree. Only do so once we know we have a replacement in hand.
+    if [ -d "$_qiv_mnt/lib/modules" ]; then
+        rm -rf "$_qiv_mnt"/lib/modules/*
+    fi
+    qemu_info "installing $_qiv_ver kernel modules into guest (full tree)..."
+    mkdir -p "$_qiv_mnt/lib/modules"
+    if ! cp -a "$_qiv_src" "$_qiv_mnt/lib/modules/$_qiv_ver"; then
+        qemu_warn "failed to copy module tree into guest; some modules may be missing"
+    fi
+
+    # Guard against a depmod-less cache (dep tables missing → modprobe can't resolve).
+    if [ ! -e "$_qiv_mnt/lib/modules/$_qiv_ver/modules.dep" ] && qemu_have depmod; then
+        depmod -b "$_qiv_mnt" "$_qiv_ver" 2>/dev/null || true
+    fi
 }
 
 # _qemu_patch_fstab_for_virt ROOTFS_MNT — make /boot/firmware mount resilient on virtio.
