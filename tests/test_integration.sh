@@ -306,6 +306,39 @@ EOF
     assert_eq "fstab line not duplicated on re-apply" "$_ti_n" "1"
     rm -rf "$ROOT"
 
+    # --- Keyboard: layout must reach the labwc compositor, not just the console.
+    # Writing only /etc/default/keyboard leaves labwc on its packaged default
+    # layout, so the desktop ignores the chosen keymap (trixie-feedback#67). The
+    # full-XKB fallback must create the per-user labwc environment override and
+    # update an existing greeter environment in place, keeping unrelated lines.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/pi" "$ROOT/etc/xdg/labwc-greeter"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    printf 'XKB_DEFAULT_LAYOUT=gb\nGDK_BACKEND=wayland\n' >"$ROOT/etc/xdg/labwc-greeter/environment"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[locale]
+keymap = "fr"
+keymap_variant = "azerty"
+keymap_options = ["ctrl:nocaps"]
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_lenv="$ROOT/home/pi/.config/labwc/environment"
+    assert_file "labwc per-user environment created" "$_ti_lenv"
+    assert_contains "labwc layout matches chosen keymap" "$(cat "$_ti_lenv" 2>/dev/null)" "XKB_DEFAULT_LAYOUT=fr"
+    assert_contains "labwc variant matches chosen keymap" "$(cat "$_ti_lenv" 2>/dev/null)" "XKB_DEFAULT_VARIANT=azerty"
+    assert_contains "labwc options match chosen keymap" "$(cat "$_ti_lenv" 2>/dev/null)" "XKB_DEFAULT_OPTIONS=ctrl:nocaps"
+    _ti_genv="$ROOT/etc/xdg/labwc-greeter/environment"
+    assert_contains "labwc greeter layout updated" "$(cat "$_ti_genv" 2>/dev/null)" "XKB_DEFAULT_LAYOUT=fr"
+    assert_contains "labwc greeter preserves unrelated lines" "$(cat "$_ti_genv" 2>/dev/null)" "GDK_BACKEND=wayland"
+    assert_ncontains "labwc greeter drops stale layout" "$(cat "$_ti_genv" 2>/dev/null)" "XKB_DEFAULT_LAYOUT=gb"
+    # Idempotent: re-apply must not duplicate the XKB keys.
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_n=$(grep -c '^XKB_DEFAULT_LAYOUT=' "$_ti_lenv" 2>/dev/null | tr -d ' ')
+    assert_eq "labwc layout key not duplicated on re-apply" "$_ti_n" "1"
+    rm -rf "$ROOT"
+
     # --- Packages: sandbox has no apt-get, so the request is reported skipped ---
     ROOT=$(mktemp -d)
     mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"

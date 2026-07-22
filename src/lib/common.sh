@@ -117,6 +117,15 @@ first_user() {
     fi
 }
 
+# first_user_home — home directory of UID 1000 on the target (best effort).
+first_user_home() {
+    if [ -z "$RPI_PRESEED_ROOT" ]; then
+        getent passwd 1000 2>/dev/null | cut -d: -f6
+    else
+        awk -F: '$3==1000 {print $6; exit}' "$(target_path /etc/passwd)" 2>/dev/null
+    fi
+}
+
 # report_run KEY SOURCE CMD... — run CMD; record applied/failed for KEY.
 report_run() {
     _rr_key=$1; _rr_src=$2; shift 2
