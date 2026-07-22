@@ -1,0 +1,4 @@
+config_version = "99.99"
+
+[system]
+hostname = "badver"

@@ -1,0 +1,8 @@
+config_version = "1.1"
+
+[system]
+hostname = "earlyto"
+
+[runcmd]
+early = ["sleep 30"]
+early_cmd_timeout = 2

@@ -36,6 +36,9 @@ rpi-preseed collect-logs [--include-runcmd-output] # build a redacted diagnostic
 ```
 make check          # shellcheck + unit tests
 make test           # unit tests only
+make qemu-check     # qemu integration (auto-downloads Pi OS Lite arm64; see tests/qemu/README.md)
+make qemu-download  # fetch Pi OS image only
+make qemu-list      # list qemu scenarios
 ```
 
 The scripts honour these environment overrides so they can run unprivileged in a

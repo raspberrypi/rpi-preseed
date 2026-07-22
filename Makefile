@@ -10,8 +10,10 @@ DOCDIR   = $(PREFIX)/share/doc/rpi-preseed
 UNITDIR  = /lib/systemd/system
 
 SCRIPTS = $(wildcard src/lib/*.sh) $(wildcard src/apply/*.sh) src/rpi-preseed
+QEMU_SCRIPTS = $(wildcard tests/qemu/lib/*.sh) tests/qemu/run.sh tests/qemu/probe/collect.sh \
+	$(wildcard tests/qemu/scenarios/*/fault.sh) $(wildcard tests/qemu/scenarios/*/expect.sh)
 
-.PHONY: all install check test shellcheck clean
+.PHONY: all install check test shellcheck clean qemu-check qemu-list qemu-download
 
 all:
 	@echo "Nothing to build (POSIX shell). Try: make check | make install"
@@ -38,10 +40,20 @@ check: shellcheck test
 shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not installed; skipping"; exit 0; }
 	shellcheck -x $(SCRIPTS) tests/run.sh tests/test_toml.sh tests/test_validate.sh tests/test_redact.sh tests/test_hash.sh tests/test_integration.sh
+	shellcheck -x $(QEMU_SCRIPTS)
 	@echo "shellcheck OK"
 
 test:
 	@sh tests/run.sh
+
+qemu-check:
+	@sh tests/qemu/run.sh
+
+qemu-download:
+	@sh tests/qemu/run.sh --download-only
+
+qemu-list:
+	@ls -1 tests/qemu/scenarios
 
 clean:
 	@rm -f tests/*.log

@@ -1,0 +1,14 @@
+config_version = "1.1"
+
+[system]
+hostname = "netpart"
+
+[packages]
+update = false
+install = ["sl"]
+
+[runcmd]
+late = ["true"]
+late_gate_timeout = 30
+late_require_time_sync = false
+late_wait_for_apt_lock = false

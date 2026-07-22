@@ -1,0 +1,9 @@
+config_version = "1.1"
+
+[system]
+hostname = "readonly"
+
+[wlan]
+ssid = "TestNet"
+password = "SUPERSECRETPSK"
+country = "GB"

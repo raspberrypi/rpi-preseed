@@ -1,0 +1,13 @@
+config_version = "1.1"
+
+[system]
+hostname = "powercut"
+
+[user]
+name = "cutuser"
+password = "changeme"
+
+[runcmd]
+# Recovery must not block forever under virt (no NTP).
+late_require_time_sync = false
+late_gate_timeout = 30

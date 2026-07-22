@@ -1,0 +1,26 @@
+config_version = "1.1"
+
+[system]
+hostname = "qemutest"
+
+[user]
+name = "alice"
+password = "changeme"
+groups = ["sudo"]
+
+[ssh]
+enabled = true
+password_authentication = false
+authorized_keys = [
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexampleexampleexampleexample alice@laptop",
+]
+
+[locale]
+keymap = "gb"
+timezone = "Europe/London"
+
+[runcmd]
+early = ["true"]
+late = ["true"]
+# Virt hosts have no working NTP; skip the late gate's time-sync wait.
+late_require_time_sync = false

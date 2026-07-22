@@ -1,0 +1,17 @@
+[Unit]
+Description=rpi-preseed qemu test probe (collect results and power off)
+# After early (not late): late has After=time-sync.target / network-online and
+# TimeoutStartSec=infinity, which can wedge the probe under virt. collect.sh
+# waits for runcmd-done (or its own deadline) before powering off.
+After=rpi-preseed.service rpi-preseed-runcmd-early.service
+Wants=rpi-preseed-runcmd-late.service
+ConditionPathExists=!/var/lib/rpi-preseed/qemu-results/done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/rpi-preseed-probe/collect.sh
+TimeoutStartSec=900
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

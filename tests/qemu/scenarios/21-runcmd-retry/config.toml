@@ -1,0 +1,10 @@
+config_version = "1.1"
+
+[system]
+hostname = "retryhost"
+
+[runcmd]
+late = ["sh -c 'test -f /tmp/rpi-preseed-retry-marker || { touch /tmp/rpi-preseed-retry-marker; exit 1; }'"]
+late_retries = 3
+late_retry_delay = 1
+late_require_time_sync = false
