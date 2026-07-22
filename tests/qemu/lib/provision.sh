@@ -80,6 +80,21 @@ _qemu_patch_fstab_for_virt() {
     # Ensure vfat is attempted early.
     mkdir -p "$_qpf_mnt/etc/modules-load.d"
     printf '%s\n' fat vfat nls_cp437 nls_ascii >"$_qpf_mnt/etc/modules-load.d/rpi-preseed-qemu-virt.conf"
+
+    # `nofail` above drops boot-firmware.mount out of local-fs.target's requirements,
+    # so rpi-preseed.service (After=local-fs.target, ConditionPathExists=the config on
+    # /boot/firmware) can race ahead of the mount and be skipped — which is exactly how
+    # the power-cut recovery boot silently failed to re-apply. Pin the ordering so the
+    # config partition is always mounted before rpi-preseed evaluates its condition.
+    _qpf_dropin="$_qpf_mnt/etc/systemd/system/rpi-preseed.service.d"
+    mkdir -p "$_qpf_dropin"
+    cat >"$_qpf_dropin/10-boot-firmware-order.conf" <<'EOF'
+[Unit]
+# Do not evaluate ConditionPathExists=/boot/firmware/... before the FAT partition
+# is mounted (it is nofail under -M virt, so not implied by local-fs.target).
+Wants=boot-firmware.mount
+After=boot-firmware.mount
+EOF
 }
 
 # _qemu_mask_systemd_unit ROOTFS_MNT UNIT — mask a unit under /etc/systemd/system.
