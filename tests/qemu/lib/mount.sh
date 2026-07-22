@@ -23,39 +23,81 @@ qemu_part_start_sectors() {
     printf '%s' "$_qps_start"
 }
 
-# qemu_disk_map IMAGE — expose IMAGE as a raw-mappable file (identity for raw; FUSE for qcow2).
+# _qemu_sd_wait_ready PID FILE — wait until a storage-daemon FUSE export is live.
+# The empty temp mountpoint reports a non-zero size once the export mounts over it.
+_qemu_sd_wait_ready() {
+    _sdw_pid="$1"
+    _sdw_file="$2"
+    _sdw_i=0
+    while [ "$_sdw_i" -lt 100 ]; do
+        [ "$(stat -c %s "$_sdw_file" 2>/dev/null || echo 0)" -gt 0 ] && return 0
+        kill -0 "$_sdw_pid" 2>/dev/null || return 1
+        sleep 0.1 2>/dev/null || sleep 1
+        _sdw_i=$((_sdw_i + 1))
+    done
+    return 1
+}
+
+# qemu_disk_map IMAGE [OFFSET SIZE] — expose IMAGE as a raw-mappable file.
+# Whole disk: identity for raw, FUSE export for qcow2. With OFFSET+SIZE (bytes),
+# exposes only that sub-range as a zero-offset image (used to hand fuse2fs a bare
+# partition, since fuse2fs before e2fsprogs 1.47 has no offset= option).
 # Sets QEMU_DISK_MAP (path) and optional QEMU_DISK_MAP_PID / QEMU_DISK_MAP_FILE.
 qemu_disk_map() {
     _qdm_img="$1"
+    _qdm_off="${2:-}"
+    _qdm_size="${3:-}"
     qemu_disk_unmap
+
+    # Whole-disk raw image: use the file directly (dd/od/mtools read it fine;
+    # only fuse2fs needs a partition sub-range via the storage daemon).
+    if [ -z "$_qdm_off" ]; then
+        case "$_qdm_img" in
+            *.qcow2) ;;
+            *)
+                QEMU_DISK_MAP="$_qdm_img"
+                QEMU_DISK_MAP_PID=
+                QEMU_DISK_MAP_FILE=
+                return 0
+                ;;
+        esac
+    fi
+
+    if ! qemu_have qemu-storage-daemon; then
+        qemu_die "need qemu-storage-daemon to map $_qdm_img"
+    fi
+
+    QEMU_DISK_MAP_FILE=$(mktemp)
+    : >"$QEMU_DISK_MAP_FILE"
+
+    # Build the block chain: file [-> qcow2] [-> raw sub-range]; export the top node.
+    set -- --blockdev "driver=file,filename=$_qdm_img,node-name=file"
+    _qdm_node="file"
     case "$_qdm_img" in
         *.qcow2)
-            if ! qemu_have qemu-storage-daemon; then
-                qemu_die "need qemu-storage-daemon to edit qcow2 images"
-            fi
-            QEMU_DISK_MAP_FILE=$(mktemp)
-            : >"$QEMU_DISK_MAP_FILE"
-            _qdm_pidfile=$(mktemp)
-            # --daemonize: parent returns after export is up. stderr must not be a
-            # pipe to this shell (the allow_other warning alone will deadlock FUSE).
-            qemu-storage-daemon \
-                --daemonize \
-                --blockdev "driver=file,filename=$_qdm_img,node-name=file" \
-                --blockdev "driver=qcow2,file=file,node-name=qcow" \
-                --export "type=fuse,id=exp0,node-name=qcow,mountpoint=$QEMU_DISK_MAP_FILE,writable=on" \
-                --pidfile "$_qdm_pidfile" >/dev/null 2>&1 \
-                || qemu_die "qemu-storage-daemon failed to export $_qdm_img"
-            QEMU_DISK_MAP_PID=$(cat "$_qdm_pidfile" 2>/dev/null || true)
-            rm -f "$_qdm_pidfile"
-            [ -n "$QEMU_DISK_MAP_PID" ] || qemu_die "qemu-storage-daemon wrote no pid for $_qdm_img"
-            QEMU_DISK_MAP="$QEMU_DISK_MAP_FILE"
-            ;;
-        *)
-            QEMU_DISK_MAP="$_qdm_img"
-            QEMU_DISK_MAP_PID=
-            QEMU_DISK_MAP_FILE=
+            set -- "$@" --blockdev "driver=qcow2,file=file,node-name=disk"
+            _qdm_node="disk"
             ;;
     esac
+    if [ -n "$_qdm_off" ]; then
+        set -- "$@" --blockdev "driver=raw,file=$_qdm_node,offset=$_qdm_off,size=$_qdm_size,node-name=part"
+        _qdm_node=part
+    fi
+
+    # Background rather than --daemonize (that option only landed in QEMU 7.1, but
+    # Ubuntu 22.04 ships 6.2.0). `&` works on every version and yields the daemon
+    # PID directly. stderr must go to /dev/null, never a pipe to this shell (a lone
+    # FUSE allow_other warning would deadlock the export).
+    qemu-storage-daemon "$@" \
+        --export "type=fuse,id=exp0,node-name=$_qdm_node,mountpoint=$QEMU_DISK_MAP_FILE,writable=on" \
+        >/dev/null 2>&1 &
+    QEMU_DISK_MAP_PID=$!
+
+    if ! _qemu_sd_wait_ready "$QEMU_DISK_MAP_PID" "$QEMU_DISK_MAP_FILE"; then
+        qemu_disk_unmap
+        qemu_die "qemu-storage-daemon failed to export $_qdm_img (FUSE export did not come up)"
+    fi
+    QEMU_DISK_MAP="$QEMU_DISK_MAP_FILE"
 }
 
 qemu_disk_unmap() {
@@ -95,11 +137,19 @@ qemu_rootfs_mount() {
     if ! qemu_have fuse2fs; then
         qemu_die "need fuse2fs (apt install fuse2fs) for rootless ext4 mounts"
     fi
+    # Read partition 2 geometry from the MBR (whole-disk map), then release it.
     qemu_disk_map "$_qrm_img"
     _qrm_start=$(qemu_part_start_sectors "$QEMU_DISK_MAP" 2)
-    _qrm_off=$((_qrm_start * 512))
+    _qrm_size=$(qemu_part_size_sectors "$QEMU_DISK_MAP" 2) || _qrm_size=0
+    qemu_disk_unmap
+    [ "$_qrm_size" -gt 0 ] 2>/dev/null || \
+        qemu_die "could not determine rootfs partition size of $_qrm_img"
+
+    # Re-map ONLY partition 2 as a zero-offset image, so fuse2fs needs no offset=
+    # option (absent before e2fsprogs 1.47; Ubuntu 22.04 ships 1.46).
+    qemu_disk_map "$_qrm_img" "$((_qrm_start * 512))" "$((_qrm_size * 512))"
     QEMU_ROOTFS_MNT=$(mktemp -d)
-    if fuse2fs -o "offset=$_qrm_off,fakeroot,rw" "$QEMU_DISK_MAP" "$QEMU_ROOTFS_MNT" 2>/dev/null; then
+    if fuse2fs -o "fakeroot,rw" "$QEMU_DISK_MAP" "$QEMU_ROOTFS_MNT" 2>/dev/null; then
         :
     else
         rmdir "$QEMU_ROOTFS_MNT" 2>/dev/null || true

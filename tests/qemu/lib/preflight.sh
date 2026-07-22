@@ -27,6 +27,11 @@ qemu_preflight() {
         _pf_ok=1
     fi
 
+    if ! qemu_have stat; then
+        qemu_warn "stat not found (needed to detect qcow2 FUSE export readiness)"
+        _pf_ok=1
+    fi
+
     if ! qemu_have fusermount3 && ! qemu_have fusermount; then
         qemu_warn "fusermount not found (needed to unmount fuse2fs mounts)"
         _pf_ok=1
