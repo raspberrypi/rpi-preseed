@@ -145,6 +145,10 @@ main() {
         return 0
     fi
 
+    # Global safety net: reclaim mounts/daemons/guest/staging on any exit,
+    # including set -e failures and Ctrl-C, not just the clean path.
+    trap 'qemu_teardown' EXIT INT TERM
+
     qemu_cleanup_stale_mounts
 
     if ! qemu_preflight; then

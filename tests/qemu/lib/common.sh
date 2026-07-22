@@ -21,6 +21,11 @@ qemu_have() {
 
 qemu_die() {
     printf 'qemu-harness: %s\n' "$*" >&2
+    # Tear down mounts/daemons/guest/staging before exiting (defined in mount.sh;
+    # guarded so early failures during sourcing still exit cleanly).
+    if command -v qemu_teardown >/dev/null 2>&1; then
+        qemu_teardown 2>/dev/null || true
+    fi
     exit 1
 }
 

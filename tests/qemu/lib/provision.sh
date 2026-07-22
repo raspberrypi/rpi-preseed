@@ -206,6 +206,7 @@ qemu_prepare_provisioned_image() {
     qemu-img create -f qcow2 -o "backing_file=$_qppi_prepared,backing_fmt=raw" "$_qppi_out" >/dev/null
 
     _qppi_stage=$(mktemp -d)
+    QEMU_STAGE_DIR="$_qppi_stage"
     qemu_stage_install "$_qppi_stage"
     install -d "$_qppi_stage/usr/local/lib/rpi-preseed-probe"
     install -d "$_qppi_stage/lib/systemd/system"
@@ -238,8 +239,8 @@ qemu_prepare_provisioned_image() {
         "$QEMU_ROOTFS_MNT/etc/systemd/system/multi-user.target.wants/rpi-preseed-probe.service"
 
     qemu_rootfs_umount
-    trap - EXIT INT TERM
     rm -rf "$_qppi_stage"
+    QEMU_STAGE_DIR=
     printf '%s' "$_qppi_key" >"$_qppi_stamp"
     QEMU_PROVISIONED_IMAGE="$_qppi_out"
     qemu_info "base image provisioned at $_qppi_out"

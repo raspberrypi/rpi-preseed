@@ -6,6 +6,29 @@ QEMU_DISK_MAP=
 QEMU_DISK_MAP_PID=
 QEMU_DISK_MAP_FILE=
 QEMU_ROOTFS_MNT=
+# Temp staging dir tracked so the global teardown can reclaim it on any exit.
+QEMU_STAGE_DIR=
+
+# qemu_teardown — best-effort teardown of everything the harness may leave behind:
+# a running guest, the serial watcher, an ext4 FUSE mount, the qcow2 storage-daemon
+# export, and the install staging dir. Idempotent and safe to call with nothing
+# active, so it works as both a global EXIT/INT/TERM trap and a qemu_die hook.
+qemu_teardown() {
+    if command -v qemu_stop_watch >/dev/null 2>&1; then
+        qemu_stop_watch 2>/dev/null || true
+    fi
+    if [ -n "${QEMU_PID:-}" ]; then
+        kill "$QEMU_PID" 2>/dev/null || true
+        wait "$QEMU_PID" 2>/dev/null || true
+        QEMU_PID=
+    fi
+    # Covers both a live rootfs mount and a bare disk map (no mount).
+    qemu_rootfs_umount 2>/dev/null || true
+    if [ -n "${QEMU_STAGE_DIR:-}" ]; then
+        rm -rf "$QEMU_STAGE_DIR" 2>/dev/null || true
+        QEMU_STAGE_DIR=
+    fi
+}
 
 # qemu_part_start_sectors MAP_PATH PARTNUM — start sector of MBR partition PARTNUM.
 # Prefer a direct MBR parse: sfdisk can hang or scan too slowly on FUSE-exported qcow2.
@@ -157,8 +180,8 @@ qemu_rootfs_mount() {
         qemu_disk_unmap
         qemu_die "fuse2fs failed to mount rootfs of $_qrm_img"
     fi
-    # shellcheck disable=SC2064
-    trap 'qemu_rootfs_umount' EXIT INT TERM
+    # Teardown is handled globally (run.sh trap + qemu_die hook), so no per-mount
+    # trap is needed here — and none that provision.sh would have to clear.
 }
 
 qemu_rootfs_umount() {
