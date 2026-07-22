@@ -50,7 +50,7 @@ qemu_boot() {
         -initrd "$_qb_initrd" \
         -drive "file=$_qb_img,format=$_qb_fmt,if=none,id=hd0,cache=writeback" \
         -device virtio-blk-pci,drive=hd0 \
-        -append "root=/dev/vda2 rootfstype=ext4 rw fsck.repair=yes console=ttyAMA0,115200" \
+        -append "root=/dev/vda2 rootfstype=ext4 rw fsck.repair=yes console=ttyAMA0,115200 ${RPI_PRESEED_QEMU_APPEND_EXTRA:-}" \
         $_qb_net \
         -serial "file:$_qb_serial" \
         -display none \
