@@ -114,7 +114,7 @@ _qemu_verify_sha256() {
     _qvs_base=$(basename -- "$_qvs_file")
     (
         cd "$_qvs_dir" || exit 1
-        sha256sum -c "$_qvs_sum" 2>/dev/null || {
+        sha256sum -c "$_qvs_sum" >/dev/null 2>&1 || {
             _qvs_expected=$(sed -n 's/^[[:space:]]*\([0-9a-fA-F]\{64\}\).*/\1/p' "$_qvs_sum" | head -n1)
             _qvs_got=$(sha256sum "$_qvs_base" | awk '{print $1}')
             [ -n "$_qvs_expected" ] && [ "$_qvs_expected" = "$_qvs_got" ]
