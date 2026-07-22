@@ -17,6 +17,11 @@ sudo apt install qemu-system-arm qemu-utils fuse2fs mtools xz-utils util-linux \
 
 - **Boot kernel**: Debian `linux-image-arm64` (virtio). Pi `*rpt*` kernels cannot boot `-M virt`.
 - **Initrd**: harness builds a cached virtio initrd via `mkinitramfs` (host `MODULES=dep` initrds often lack virtio).
+- **No native arm64 kernel (e.g. x86_64 CI)**: when `/boot` has no `linux-image-arm64`, the
+  harness auto-fetches a Debian arm64 kernel `.deb` from the Debian mirror and builds a matching
+  virtio initrd (with a static arm64 `busybox`) entirely rootless — no `linux-image-arm64` install
+  needed on the host. Cached under `~/.cache/rpi-preseed-qemu/cache/debian-kernel/`. Disable with
+  `RPI_PRESEED_QEMU_AUTO_DOWNLOAD=0`, or bypass with `RPI_PRESEED_QEMU_KERNEL` / `_INITRD`.
 - **Acceleration**: aarch64 + `/dev/kvm` → `-enable-kvm -cpu host`; else TCG.
 - **Image edits**: `fuse2fs` (ext4) + `mtools` (FAT); qcow2 via `qemu-storage-daemon` FUSE export.
 - **Rootfs grow**: partition grow uses `losetup`+`resize2fs` when available (fuse2fs alone cannot expand).
@@ -38,6 +43,9 @@ make qemu-check SCENARIO=00-happy-path
 | `RPI_PRESEED_QEMU_KERNEL` / `_INITRD` | Override Debian boot kernel/initrd |
 | `RPI_PRESEED_QEMU_TIMEOUT` | Watchdog seconds (default 600) |
 | `RPI_PRESEED_QEMU_MEM` / `_SMP` | Guest RAM MiB / vCPUs (2048 / 4) |
+| `RPI_PRESEED_QEMU_DEBIAN_MIRROR` | Debian mirror for auto-fetched kernel (`https://deb.debian.org/debian`) |
+| `RPI_PRESEED_QEMU_DEBIAN_SUITE` | Debian suite for auto-fetched kernel (`trixie`) |
+| `RPI_PRESEED_QEMU_BUSYBOX` | Static arm64 busybox for the built initrd (else auto-fetched) |
 
 ## How it works
 

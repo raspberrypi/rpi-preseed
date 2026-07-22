@@ -16,6 +16,8 @@ export QEMU_TESTS QEMU_REPO
 . "$QEMU_TESTS/lib/mount.sh"
 # shellcheck source=tests/qemu/lib/preflight.sh
 . "$QEMU_TESTS/lib/preflight.sh"
+# shellcheck source=tests/qemu/lib/debkernel.sh
+. "$QEMU_TESTS/lib/debkernel.sh"
 # shellcheck source=tests/qemu/lib/image.sh
 . "$QEMU_TESTS/lib/image.sh"
 # shellcheck source=tests/qemu/lib/provision.sh

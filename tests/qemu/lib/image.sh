@@ -3,10 +3,14 @@
 
 # Paths set by qemu_prepare_image:
 #   QEMU_PREPARED_IMAGE  QEMU_KERNEL  QEMU_INITRD
-export QEMU_PREPARED_IMAGE QEMU_KERNEL QEMU_INITRD
+#   QEMU_KERNEL_UNAME    QEMU_KERNEL_MODULES  (boot kernel's `uname -r` + module tree,
+#   so provisioning can install vfat/nls into the guest for -M virt /boot/firmware)
+export QEMU_PREPARED_IMAGE QEMU_KERNEL QEMU_INITRD QEMU_KERNEL_UNAME QEMU_KERNEL_MODULES
 QEMU_PREPARED_IMAGE=
 QEMU_KERNEL=
 QEMU_INITRD=
+QEMU_KERNEL_UNAME=
+QEMU_KERNEL_MODULES=
 
 _qemu_resolve_input() {
     if [ -n "${RPI_PRESEED_QEMU_IMAGE:-}" ] && [ -f "$RPI_PRESEED_QEMU_IMAGE" ]; then
@@ -236,16 +240,41 @@ qemu_resolve_virt_kernel() {
     fi
 
     if [ -z "$QEMU_KERNEL" ] || [ -z "$QEMU_INITRD" ]; then
-        _rvk_pair=$(_qemu_pick_host_virt_kernel) || \
-            qemu_die "need a virtio-capable aarch64 kernel: install linux-image-arm64, or set RPI_PRESEED_QEMU_KERNEL and RPI_PRESEED_QEMU_INITRD"
-        # shellcheck disable=SC2086
-        set -- $_rvk_pair
-        QEMU_KERNEL=${QEMU_KERNEL:-$1}
-        # Host initrd is typically MODULES=dep without virtio on Pi hosts — ignore it
-        # unless the user overrode RPI_PRESEED_QEMU_INITRD above.
-        if [ -z "$QEMU_INITRD" ]; then
-            QEMU_INITRD=
+        if _rvk_pair=$(_qemu_pick_host_virt_kernel); then
+            # shellcheck disable=SC2086
+            set -- $_rvk_pair
+            QEMU_KERNEL=${QEMU_KERNEL:-$1}
+            # Host initrd is typically MODULES=dep without virtio on Pi hosts —
+            # ignore it (rebuilt below) unless RPI_PRESEED_QEMU_INITRD was set.
+            if [ -z "$QEMU_INITRD" ]; then
+                QEMU_INITRD=
+            fi
+            QEMU_KERNEL_UNAME=$(basename -- "$QEMU_KERNEL" | sed 's/^vmlinuz-//')
+            QEMU_KERNEL_MODULES="/lib/modules/$QEMU_KERNEL_UNAME"
+        elif [ "${RPI_PRESEED_QEMU_AUTO_DOWNLOAD:-1}" != 0 ]; then
+            # No native arm64 kernel (e.g. x86_64 host): fetch a Debian arm64
+            # kernel + build a matching virtio initrd, and cache its module tree
+            # (kernel initrd moddir uname) so the guest can mount vfat /boot/firmware.
+            qemu_info "no host arm64 kernel; fetching Debian arm64 virt kernel..."
+            _rvk_pair=$(qemu_resolve_debian_virt_kernel) || \
+                qemu_die "could not obtain a Debian arm64 virt kernel; set RPI_PRESEED_QEMU_KERNEL and RPI_PRESEED_QEMU_INITRD"
+            # shellcheck disable=SC2086
+            set -- $_rvk_pair
+            QEMU_KERNEL=${QEMU_KERNEL:-$1}
+            QEMU_INITRD=${QEMU_INITRD:-$2}
+            QEMU_KERNEL_MODULES=${3:-}
+            QEMU_KERNEL_UNAME=${4:-}
+        else
+            qemu_die "need a virtio-capable aarch64 kernel: install linux-image-arm64, set RPI_PRESEED_QEMU_KERNEL and RPI_PRESEED_QEMU_INITRD, or enable auto-download"
         fi
+    fi
+
+    # Best-effort module tree for an explicitly-overridden kernel.
+    if [ -z "$QEMU_KERNEL_UNAME" ]; then
+        QEMU_KERNEL_UNAME=$(basename -- "$QEMU_KERNEL" | sed 's/^vmlinuz-//')
+    fi
+    if [ -z "$QEMU_KERNEL_MODULES" ] && [ -d "/lib/modules/$QEMU_KERNEL_UNAME" ]; then
+        QEMU_KERNEL_MODULES="/lib/modules/$QEMU_KERNEL_UNAME"
     fi
 
     case "$QEMU_KERNEL" in
