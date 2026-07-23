@@ -11,10 +11,10 @@ apply_ssh() {
     if imager_available; then
         if toml_bool ssh.password_authentication false; then set -- --pass-auth; else set -- --key-only; fi
         [ "$_ash_enabled" -eq 1 ] || set -- "$@" --disabled
-        toml_array ssh.authorized_keys | while IFS= read -r _ash_k; do
-            [ -n "$_ash_k" ] && set -- "$@" "$_ash_k"
-        done
-        report_run ssh.enabled imager_custom "$IMAGER_CUSTOM" enable_ssh "$@"
+        _ash_params="$(printf "%s\n" "$@"; toml_array ssh.authorized_keys | while IFS= read -r _ash_k; do
+            [ -n "$_ash_k" ] && printf "%s\n" "$_ash_k"
+        done | tr '\n' ' ')"
+        report_run ssh.enabled imager_custom "$IMAGER_CUSTOM" enable_ssh "$_ash_params"
         _ash_ids=$(toml_array ssh.ssh_import_id | tr '\n' ' ')
         # shellcheck disable=SC2086
         [ -n "$_ash_ids" ] && report_run ssh.ssh_import_id imager_custom "$IMAGER_CUSTOM" import_ssh_id $_ash_ids
