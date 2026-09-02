@@ -15,6 +15,11 @@ authorized_keys = [
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexampleexampleexampleexample alice@laptop",
 ]
 
+[connect]
+enabled = true
+mode = "token"
+token = "qemu-not-a-real-token"
+
 [locale]
 keymap = "gb"
 timezone = "Europe/London"
