@@ -22,6 +22,10 @@ t_ownership() {
         "$(RPI_PRESEED_ROOT=$_to_root user_ids alice)" "1000:1000"
     assert_eq "user_ids is empty for a user the target does not have" \
         "$(RPI_PRESEED_ROOT=$_to_root user_ids nobodyhere)" ""
+    assert_eq "user_home reads the target passwd" \
+        "$(RPI_PRESEED_ROOT=$_to_root user_home alice)" "/home/alice"
+    assert_eq "user_home is empty for a user the target does not have" \
+        "$(RPI_PRESEED_ROOT=$_to_root user_home nobodyhere)" ""
 
     # Never fails an applier, whatever it is handed.
     assert_ok "own_user_path tolerates an unknown user" \

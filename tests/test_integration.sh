@@ -242,6 +242,61 @@ EOF
     _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
     assert_contains "connect.token recorded in the report" "$_ti_rep" "connect.token"
     assert_ncontains "token value never reaches the report" "$_ti_rep" "tok-abc-123"
+    # No Connect units in this image, so enablement has nothing to do and says so.
+    assert_contains "connect.units skipped without rpi-connect" "$_ti_rep" "rpi-connect units not present"
+    rm -rf "$ROOT"
+
+    # --- Connect enablement survives a boot with no user manager -------------
+    # `rpi-connect on` needs a running user manager and a first boot has none,
+    # so enablement has to be static: wants symlinks the account's own manager
+    # reads when it next starts, plus lingering so logind starts it at boot.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/alice" "$ROOT/usr/lib/systemd/user"
+    echo "alice:x:1000:1000:,,,:/home/alice:/bin/bash" >"$ROOT/etc/passwd"
+    for _ti_u in rpi-connect.service rpi-connect-wayvnc.service rpi-connect-signin.path; do
+        : >"$ROOT/usr/lib/systemd/user/$_ti_u"
+    done
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[connect]
+enabled = true
+mode = "token"
+token = "tok-abc-123"
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_uw="$ROOT/home/alice/.config/systemd/user"
+    assert_ok "rpi-connect.service wanted by default.target" \
+        "[ -L $_ti_uw/default.target.wants/rpi-connect.service ]"
+    assert_ok "rpi-connect-wayvnc.service wanted by default.target" \
+        "[ -L $_ti_uw/default.target.wants/rpi-connect-wayvnc.service ]"
+    assert_ok "rpi-connect-signin.path wanted by paths.target" \
+        "[ -L $_ti_uw/paths.target.wants/rpi-connect-signin.path ]"
+    assert_eq "the link names the on-device unit path, not the staging root" \
+        "$(readlink "$_ti_uw/default.target.wants/rpi-connect.service")" \
+        "/usr/lib/systemd/user/rpi-connect.service"
+    assert_file "lingering enabled for the account" "$ROOT/var/lib/systemd/linger/alice"
+    assert_contains "connect.units recorded as applied" \
+        "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" "3 linked, lingering enabled"
+    rm -rf "$ROOT"
+
+    # --- SSH fallback keys are not duplicated on re-apply --------------------
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/alice"
+    echo "alice:x:1000:1000:,,,:/home/alice:/bin/bash" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[ssh]
+enabled = true
+authorized_keys = ["ssh-ed25519 AAAAKEY1 a@b", "ssh-ed25519 AAAAKEY2 c@d"]
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_ak="$ROOT/home/alice/.ssh/authorized_keys"
+    assert_eq "both keys installed" "$(grep -c '^ssh-ed25519' "$_ti_ak" 2>/dev/null)" "2"
+    assert_eq "first key not duplicated on re-apply" \
+        "$(grep -cF 'AAAAKEY1' "$_ti_ak" 2>/dev/null)" "1"
     rm -rf "$ROOT"
 
     # --- Supplementary groups: rename + add to sudo, preserve/skip correctly ---

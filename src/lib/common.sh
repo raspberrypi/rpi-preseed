@@ -76,6 +76,16 @@ user_ids() {
     fi
 }
 
+# user_home USER — home directory for USER on the target, empty when not found.
+user_home() {
+    if [ -z "$RPI_PRESEED_ROOT" ]; then
+        getent passwd "$1" 2>/dev/null | cut -d: -f6
+    else
+        awk -F: -v u="$1" '$1==u {print $6; exit}' \
+            "$(target_path /etc/passwd)" 2>/dev/null
+    fi
+}
+
 # own_user_path USER PATH... — give PATHs to USER.
 #
 # Anything an applier writes is created by root: mkdir in ensure_dir and
@@ -96,8 +106,11 @@ own_user_path() {
     _oup_ids=$(user_ids "$_oup_user")
     [ -n "$_oup_ids" ] || return 0
     for _oup_p in "$@"; do
-        [ -e "$_oup_p" ] || continue
-        chown "$_oup_ids" "$_oup_p" 2>/dev/null || true
+        [ -e "$_oup_p" ] || [ -L "$_oup_p" ] || continue
+        # -h so a symlink is retargeted rather than followed: the enablement
+        # links point at unit files under /usr/lib, which are not ours to give
+        # away. Harmless on everything that is not a symlink.
+        chown -h "$_oup_ids" "$_oup_p" 2>/dev/null || true
     done
     return 0
 }

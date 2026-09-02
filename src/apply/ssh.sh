@@ -42,13 +42,23 @@ _apply_ssh_fallback() {
     if [ -n "$_asf_keys" ]; then
         _asf_user=$(first_user)
         [ -n "$_asf_user" ] || _asf_user=$(toml_get_default user.name pi)
-        _asf_home=$(target_path "/home/$_asf_user")
+        _asf_home=$(user_home "$_asf_user")
+        [ -n "$_asf_home" ] || _asf_home="/home/$_asf_user"
+        _asf_home=$(target_path "$_asf_home")
+        _asf_ak="$_asf_home/.ssh/authorized_keys"
         ensure_dir "$_asf_home/.ssh" 700
-        printf '%s\n' "$_asf_keys" >>"$_asf_home/.ssh/authorized_keys"
-        chmod 600 "$_asf_home/.ssh/authorized_keys" 2>/dev/null || true
+        # Appended key by key, skipping any already present: every other applier
+        # is idempotent under re-apply, and this one used to grow a duplicate
+        # set of keys each time it ran.
+        printf '%s\n' "$_asf_keys" | while IFS= read -r _asf_k; do
+            [ -n "$_asf_k" ] || continue
+            grep -qxF -- "$_asf_k" "$_asf_ak" 2>/dev/null && continue
+            printf '%s\n' "$_asf_k" >>"$_asf_ak"
+        done
+        chmod 600 "$_asf_ak" 2>/dev/null || true
         # sshd tolerates a root-owned authorized_keys, so this is not what keeps
         # a key out; it is so the account can manage its own keys afterwards.
-        own_user_path "$_asf_user" "$_asf_home/.ssh" "$_asf_home/.ssh/authorized_keys"
+        own_user_path "$_asf_user" "$_asf_home/.ssh" "$_asf_ak"
         report_key ssh.authorized_keys applied "fallback"
     fi
     if [ -n "$(toml_array ssh.ssh_import_id)" ]; then
