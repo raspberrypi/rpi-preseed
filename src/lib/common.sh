@@ -66,6 +66,42 @@ atomic_write() {
     return 0
 }
 
+# user_ids USER — "uid:gid" for USER on the target, empty when not found.
+user_ids() {
+    if [ -z "$RPI_PRESEED_ROOT" ]; then
+        getent passwd "$1" 2>/dev/null | awk -F: '{print $3":"$4; exit}'
+    else
+        awk -F: -v u="$1" '$1==u {print $3":"$4; exit}' \
+            "$(target_path /etc/passwd)" 2>/dev/null
+    fi
+}
+
+# own_user_path USER PATH... — give PATHs to USER.
+#
+# Anything an applier writes is created by root: mkdir in ensure_dir and
+# mktemp + mv in atomic_write both leave root as the owner. Under a user's home
+# that is wrong, and silently so -- a root-owned file at mode 600 cannot be read
+# by the account it was written for, which is exactly the account a systemd
+# *user* unit runs as.
+#
+# Resolved numerically from the target's own passwd so this is also correct when
+# applying to a mounted image: chowning by name would resolve against the host's
+# passwd, which is a different machine's idea of who that user is. Missing paths
+# are skipped and a failed chown is not fatal -- ownership is a correctness
+# improvement on a best-effort applier, never a reason to abort one.
+own_user_path() {
+    _oup_user=$1
+    shift
+    [ -n "$_oup_user" ] || return 0
+    _oup_ids=$(user_ids "$_oup_user")
+    [ -n "$_oup_ids" ] || return 0
+    for _oup_p in "$@"; do
+        [ -e "$_oup_p" ] || continue
+        chown "$_oup_ids" "$_oup_p" 2>/dev/null || true
+    done
+    return 0
+}
+
 # write_stamp PATH — record a success stamp carrying provenance.
 write_stamp() {
     _ws_path="$1"

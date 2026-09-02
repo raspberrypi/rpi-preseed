@@ -14,10 +14,16 @@ apply_connect() {
 
     if [ "$_ac_mode" = token ]; then
         _ac_token=$(toml_get connect.token)
-        _ac_dir=$(target_path "/home/$_ac_user/.config/com.raspberrypi.connect")
+        _ac_home=$(target_path "/home/$_ac_user")
+        _ac_dir="$_ac_home/.config/com.raspberrypi.connect"
         ensure_dir "$_ac_dir" 700
         printf '%s' "$_ac_token" | atomic_write "$_ac_dir/auth.key"
         chmod 600 "$_ac_dir/auth.key" 2>/dev/null || true
+        # The daemon reads this as the user, so the user has to own it. .config
+        # is included because ensure_dir will have created that too on an
+        # account that has never logged in, and a root-owned .config would take
+        # more than Connect down with it.
+        own_user_path "$_ac_user" "$_ac_home/.config" "$_ac_dir" "$_ac_dir/auth.key"
         report_key connect.token applied
     fi
 
@@ -27,8 +33,13 @@ apply_connect() {
     # device key" explains why unattended enrolment did nothing).
     _report_connect_device_identity
 
-    if helpers_live && have rpi-connect; then
-        rpi-connect on >/dev/null 2>&1 || true
+    # rpi-connect's units are systemd *user* units, so `rpi-connect on` as root
+    # turns Connect on for root -- an account that holds no token and is not the
+    # one being enrolled. Drive it as the target user instead. Best effort: on a
+    # first boot there may be no user manager to talk to yet, in which case
+    # enrolment happens when that account first signs in.
+    if helpers_live && have rpi-connect && have runuser; then
+        runuser -u "$_ac_user" -- rpi-connect on >/dev/null 2>&1 || true
     fi
     report_key connect.enabled applied "$_ac_mode"
 }

@@ -41,6 +41,8 @@ assert_file()      { if [ -f "$2" ]; then ok "$1"; else no "$1 (no file: $2)"; f
 . "$REPO/tests/test_redact.sh"
 # shellcheck source=tests/test_hash.sh
 . "$REPO/tests/test_hash.sh"
+# shellcheck source=tests/test_ownership.sh
+. "$REPO/tests/test_ownership.sh"
 # shellcheck source=tests/test_integration.sh
 . "$REPO/tests/test_integration.sh"
 
@@ -48,6 +50,7 @@ echo "== toml =="        ; t_toml
 echo "== validate =="    ; t_validate
 echo "== redact =="      ; t_redact
 echo "== hash =="        ; t_hash
+echo "== ownership =="   ; t_ownership
 echo "== integration ==" ; t_integration
 
 echo "-------------------------------------"
