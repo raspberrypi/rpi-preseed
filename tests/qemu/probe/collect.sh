@@ -75,6 +75,33 @@ done
 [ -f "$BOOT/status.txt" ] && cp -a "$BOOT/status.txt" "$OUT/breadcrumb.txt"
 [ -f /etc/hostname ] && cp -a /etc/hostname "$OUT/hostname"
 [ -f /etc/passwd ] && cp -a /etc/passwd "$OUT/passwd"
+
+# Owner and mode of everything rpi-preseed writes inside a user's home. Recorded
+# as text, and by path relative to the home, because the results are fetched off
+# the guest -- where the numeric ids mean nothing and the home's name varies with
+# the scenario. This is the only layer that can see ownership at all: the
+# unprivileged sandbox suite cannot chown, so it asserts modes and leaves the
+# owner to this.
+_ch_home=$(getent passwd 1000 2>/dev/null | cut -d: -f6)
+{
+    if [ -n "$_ch_home" ]; then
+        for _ch_p in .ssh .ssh/authorized_keys \
+                     .config/com.raspberrypi.connect \
+                     .config/com.raspberrypi.connect/auth.key \
+                     .config/systemd/user \
+                     .config/systemd/user/default.target.wants \
+                     .config/systemd/user/paths.target.wants; do
+            [ -e "$_ch_home/$_ch_p" ] || continue
+            printf '%s %s %s\n' "$_ch_p" \
+                "$(stat -c '%U:%G' "$_ch_home/$_ch_p" 2>/dev/null)" \
+                "$(stat -c '%a' "$_ch_home/$_ch_p" 2>/dev/null)"
+        done
+    fi
+    _ch_user=$(getent passwd 1000 2>/dev/null | cut -d: -f1)
+    if [ -n "$_ch_user" ] && [ -e "/var/lib/systemd/linger/$_ch_user" ]; then
+        printf 'linger present\n'
+    fi
+} >"$OUT/home-artefacts.txt"
 [ -f /boot/firmware/rpi-preseed.toml ] && cp -a /boot/firmware/rpi-preseed.toml "$OUT/config.toml"
 
 if command -v journalctl >/dev/null 2>&1; then

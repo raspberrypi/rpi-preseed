@@ -51,6 +51,7 @@ echo "== validate =="    ; t_validate
 echo "== redact =="      ; t_redact
 echo "== hash =="        ; t_hash
 echo "== ownership =="   ; t_ownership
+echo "== home files ==" ; t_home_artefacts
 echo "== integration ==" ; t_integration
 
 echo "-------------------------------------"
