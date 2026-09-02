@@ -46,6 +46,9 @@ _apply_ssh_fallback() {
         ensure_dir "$_asf_home/.ssh" 700
         printf '%s\n' "$_asf_keys" >>"$_asf_home/.ssh/authorized_keys"
         chmod 600 "$_asf_home/.ssh/authorized_keys" 2>/dev/null || true
+        # sshd tolerates a root-owned authorized_keys, so this is not what keeps
+        # a key out; it is so the account can manage its own keys afterwards.
+        own_user_path "$_asf_user" "$_asf_home/.ssh" "$_asf_home/.ssh/authorized_keys"
         report_key ssh.authorized_keys applied "fallback"
     fi
     if [ -n "$(toml_array ssh.ssh_import_id)" ]; then

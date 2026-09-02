@@ -73,7 +73,34 @@ EOF
     assert_contains "runcmd output captured to .out" "$(cat "$ROOT/var/lib/rpi-preseed/log/runcmd-late.out" 2>/dev/null)" "OUTPUT_MARKER"
     assert_ncontains "runcmd output NOT in main log" "$(cat "$ROOT/var/lib/rpi-preseed/log/runcmd-late.log" 2>/dev/null)" "OUTPUT_MARKER"
 
+    # --- Runcmd late: a command containing [ ] runs, and so do the ones after it
+    # (#4: the ']' used to close the array early, dropping later elements).
+    cat >"$CFG" <<EOF
+config_version = "1.0"
+[system]
+hostname = "newpi"
+[runcmd]
+late = [
+  "echo FIRST_CMD",
+  "sh -c 'if [ -d / ]; then echo BRACKET_CMD; fi'",
+  "echo AFTER_BRACKET",
+]
+EOF
+    rm -f "$ROOT/var/lib/rpi-preseed/log/runcmd-late.out"
+    rpp apply --phase late >/dev/null 2>&1
+    _ti_out=$(cat "$ROOT/var/lib/rpi-preseed/log/runcmd-late.out" 2>/dev/null)
+    assert_contains "bracketed runcmd executes" "$_ti_out" "BRACKET_CMD"
+    assert_contains "runcmd after a bracketed one executes" "$_ti_out" "AFTER_BRACKET"
+
     # --- collect-logs excludes runcmd output by default ---
+    cat >"$CFG" <<EOF
+config_version = "1.0"
+[system]
+hostname = "newpi"
+[runcmd]
+late = ["echo $_ti_b64 | base64 -d"]
+EOF
+    rpp apply --phase late >/dev/null 2>&1
     _ti_bundle=$(rpp collect-logs 2>/dev/null)
     assert_ncontains "default bundle excludes runcmd .out" "$(tar tzf "$_ti_bundle" 2>/dev/null)" "runcmd-late.out"
     _ti_bundle2=$(rpp collect-logs --include-runcmd-output 2>/dev/null)
@@ -190,6 +217,31 @@ EOF
     assert_contains "connect device-identity captured in report" "$_ti_rep" "connect.device_identity"
     # The sandbox has no firmware crypto service, so identity state is 'unknown'.
     assert_contains "device-identity unknown without rpi-fw-crypto" "$_ti_rep" "rpi-fw-crypto unavailable"
+    rm -rf "$ROOT"
+
+    # --- Connect token mode: the token lands where the daemon reads it --------
+    # rpi-connect runs as the user, so auth.key has to be under that user's home
+    # and owned by them -- everything an applier writes is created by root. The
+    # user here is known only to the target's passwd, which is what resolves it.
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/alice"
+    echo "alice:x:1000:1000:,,,:/home/alice:/bin/bash" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[connect]
+enabled = true
+mode = "token"
+token = "tok-abc-123"
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_ak="$ROOT/home/alice/.config/com.raspberrypi.connect/auth.key"
+    assert_file "connect auth.key written under the target user's home" "$_ti_ak"
+    assert_eq "auth.key holds the token verbatim" "$(cat "$_ti_ak" 2>/dev/null)" "tok-abc-123"
+    assert_eq "auth.key is readable only by its owner" "$(stat -c %a "$_ti_ak" 2>/dev/null)" "600"
+    _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    assert_contains "connect.token recorded in the report" "$_ti_rep" "connect.token"
+    assert_ncontains "token value never reaches the report" "$_ti_rep" "tok-abc-123"
     rm -rf "$ROOT"
 
     # --- Supplementary groups: rename + add to sudo, preserve/skip correctly ---
