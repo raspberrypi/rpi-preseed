@@ -25,41 +25,66 @@ _unescape_basic() {
     printf '%s' "$1" | sed -e 's/\\\\/\a/g' -e 's/\\"/"/g' -e 's/\a/\\/g'
 }
 
-# _emit_quoted_literals TEXT — print every quoted string literal found in TEXT,
-# one per line, in order. Used for array elements; ignores commas, comments,
-# whitespace and newlines between literals (all our arrays are arrays of strings).
-_emit_quoted_literals() {
+# _toml_scan TEXT — walk TEXT once, honouring TOML string and comment rules, and
+# print one record per token we care about, in order:
+#   B<value>   basic string literal (escapes left intact for _unescape_basic)
+#   L<value>   literal string (no unescape)
+#   ]          the bracket that closes the array TEXT opens
+#   M          a multi-line string delimiter (""" or '''), which we reject
+# Scanning stops at either of the last two. Only unquoted, uncommented brackets
+# count, so an element such as "sh -c 'if [ -d /x ]; then y; fi'" neither ends
+# the array early nor gets split, and a '#' comment cannot smuggle in an extra
+# element. Strings never span lines in the subset we accept, so each line is
+# scanned on its own — an unterminated quote can only spoil its own line.
+_toml_scan() {
     awk '
     {
-        line = line sep $0; sep = "\n"
-    }
-    END {
-        n = length(line)
-        i = 1
-        while (i <= n) {
-            c = substr(line, i, 1)
+        n = length($0)
+        for (i = 1; i <= n; i++) {
+            c = substr($0, i, 1)
             if (c == "\"") {
+                if (substr($0, i, 3) == "\"\"\"") { print "M"; exit }
                 i++; val = ""
                 while (i <= n) {
-                    c = substr(line, i, 1)
-                    if (c == "\\") { val = val substr(line, i, 2); i += 2; continue }
-                    if (c == "\"") { i++; break }
+                    c = substr($0, i, 1)
+                    if (c == "\\") { val = val substr($0, i, 2); i += 2; continue }
+                    if (c == "\"") break
                     val = val c; i++
                 }
                 print "B" val
             } else if (c == "\x27") {   # single quote: literal string, no unescape
+                if (substr($0, i, 3) == "\x27\x27\x27") { print "M"; exit }
                 i++; val = ""
                 while (i <= n) {
-                    c = substr(line, i, 1)
-                    if (c == "\x27") { i++; break }
+                    c = substr($0, i, 1)
+                    if (c == "\x27") break
                     val = val c; i++
                 }
                 print "L" val
-            } else {
-                i++
+            } else if (c == "#") {
+                next                    # comment runs to end of line
+            } else if (c == "[") {
+                depth++
+            } else if (c == "]") {
+                depth--
+                if (depth <= 0) { print "]"; exit }
             }
         }
     }'
+}
+
+# _toml_array_closed TEXT — succeed once TEXT holds the ']' closing the array it
+# opens. Callers use this instead of grepping for a bare ']' so that brackets
+# inside command strings do not truncate the array (raspberrypi/rpi-preseed#4).
+_toml_array_closed() {
+    printf '%s\n' "$1" | _toml_scan | grep -q '^]$'
+}
+
+# _toml_opens_multiline TEXT — succeed if TEXT opens a multi-line string. Asking
+# the scanner rather than matching """ textually keeps a quoted occurrence — say
+# 'python3 -c """doc"""' — from being mistaken for a delimiter.
+_toml_opens_multiline() {
+    printf '%s\n' "$1" | _toml_scan | grep -q '^M$'
 }
 
 # toml_parse FILE — parse into a fresh store. Returns non-zero on a hard error.
@@ -82,12 +107,28 @@ toml_parse() {
             _tp_first=0
         fi
 
+        # We accept only single-line strings. Silently mangling a multi-line one
+        # into stray fragments would hand runcmd garbage to execute, so refuse
+        # the file outright. The glob is a cheap gate on the scanner.
+        case "$_tp_raw" in
+            *'"""'*|*"'''"*)
+                if _toml_opens_multiline "$_tp_raw"; then
+                    echo "toml: multi-line strings are not supported; keep the value on one line: $(_trim "$_tp_raw")" >&2
+                    return 1
+                fi ;;
+        esac
+
         if [ -n "$_tp_collect" ]; then
             _tp_arrbuf="$_tp_arrbuf
 $_tp_raw"
+            # A ']' on this line is only a candidate terminator; re-scan the
+            # whole buffer to see whether it really closes the array.
             case "$_tp_raw" in
-                *']'*) _toml_flush_array "$_tp_arrkey" "$_tp_arrbuf"
-                       _tp_collect=""; _tp_arrkey=""; _tp_arrbuf="" ;;
+                *']'*)
+                    if _toml_array_closed "$_tp_arrbuf"; then
+                        _toml_flush_array "$_tp_arrkey" "$_tp_arrbuf"
+                        _tp_collect=""; _tp_arrkey=""; _tp_arrbuf=""
+                    fi ;;
             esac
             continue
         fi
@@ -121,10 +162,11 @@ $_tp_raw"
 
         case "$_tp_val" in
             '['*)
-                case "$_tp_val" in
-                    *']'*) _toml_flush_array "$_tp_fqk" "$_tp_val" ;;
-                    *) _tp_collect=1; _tp_arrkey="$_tp_fqk"; _tp_arrbuf="$_tp_val" ;;
-                esac ;;
+                if _toml_array_closed "$_tp_val"; then
+                    _toml_flush_array "$_tp_fqk" "$_tp_val"
+                else
+                    _tp_collect=1; _tp_arrkey="$_tp_fqk"; _tp_arrbuf="$_tp_val"
+                fi ;;
             '"'*)
                 _tp_s=$(_toml_scalar_string "$_tp_val" '"')
                 _toml_put s "$_tp_fqk" "$_tp_s" ;;
@@ -149,7 +191,7 @@ $_tp_raw"
 # _toml_scalar_string RHS QUOTECHAR — extract a single quoted string value,
 # discarding any trailing inline comment.
 _toml_scalar_string() {
-    _tss_first=$(printf '%s\n' "$1" | _emit_quoted_literals | head -n1)
+    _tss_first=$(printf '%s\n' "$1" | _toml_scan | head -n1)
     case "$_tss_first" in
         B*) _unescape_basic "${_tss_first#B}" ;;
         L*) printf '%s' "${_tss_first#L}" ;;
@@ -158,9 +200,10 @@ _toml_scalar_string() {
 }
 
 # _toml_flush_array KEY RAW — parse array literals out of RAW and store them.
+# The ']' record _toml_scan ends on is not an element, so it falls through.
 _toml_flush_array() {
     _tfa_key="$1"
-    printf '%s\n' "$2" | _emit_quoted_literals | while IFS= read -r _tfa_e; do
+    printf '%s\n' "$2" | _toml_scan | while IFS= read -r _tfa_e; do
         case "$_tfa_e" in
             B*) _toml_put a "$_tfa_key" "$(_unescape_basic "${_tfa_e#B}")" ;;
             L*) _toml_put a "$_tfa_key" "${_tfa_e#L}" ;;
