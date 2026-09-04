@@ -86,8 +86,7 @@ _apply_wlan_nm() {
             *)    printf '[wifi-security]\nkey-mgmt=%s\npsk=%s\n\n' "$_awf_km" "$_awf_pass" ;;
         esac
         printf '[ipv4]\nmethod=auto\n\n[ipv6]\naddr-gen-mode=default\nmethod=auto\n'
-    } | atomic_write "$_awf_file"
-    chmod 600 "$_awf_file" 2>/dev/null || true
+    } | atomic_write "$_awf_file" 600
     if [ -n "$_awf_bytes" ]; then
         report_key wlan.ssid_hex applied networkmanager
     else

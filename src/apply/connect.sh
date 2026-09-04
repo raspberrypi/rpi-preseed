@@ -22,8 +22,7 @@ apply_connect() {
         _ac_token=$(toml_get connect.token)
         _ac_dir="$_ac_home/.config/com.raspberrypi.connect"
         ensure_dir "$_ac_dir" 700
-        if printf '%s' "$_ac_token" | atomic_write "$_ac_dir/auth.key"; then
-            chmod 600 "$_ac_dir/auth.key" 2>/dev/null || true
+        if printf '%s' "$_ac_token" | atomic_write "$_ac_dir/auth.key" 600; then
             # The daemon reads this as the user, so the user has to own it.
             # .config is included because ensure_dir will have created that too
             # on an account that has never logged in, and a root-owned .config
