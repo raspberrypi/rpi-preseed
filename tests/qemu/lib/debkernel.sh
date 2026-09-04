@@ -75,7 +75,12 @@ _qemu_deb_fetch_busybox() {
         qemu_warn "dpkg-deb -x failed for busybox .deb"
         return 1
     fi
-    _fbb_bin=$(ls -1 "$_fbb_root"/bin/busybox "$_fbb_root"/usr/bin/busybox 2>/dev/null | head -n1)
+    _fbb_bin=
+    for _fbb_cand in "$_fbb_root"/bin/busybox "$_fbb_root"/usr/bin/busybox; do
+        [ -f "$_fbb_cand" ] || continue
+        _fbb_bin="$_fbb_cand"
+        break
+    done
     if [ -z "$_fbb_bin" ]; then
         qemu_warn "no busybox binary inside busybox .deb"
         return 1
@@ -211,9 +216,20 @@ _qemu_deb_build() {
         return 1
     fi
 
-    _bd_vmlinuz=$(ls -1 "$_bd_kroot"/boot/vmlinuz-* "$_bd_kroot"/usr/lib/modules/*/vmlinuz 2>/dev/null | head -n1)
+    # An unmatched glob stays literal, so the -f/-d test is what filters it out.
+    _bd_vmlinuz=
+    for _bd_cand in "$_bd_kroot"/boot/vmlinuz-* "$_bd_kroot"/usr/lib/modules/*/vmlinuz; do
+        [ -f "$_bd_cand" ] || continue
+        _bd_vmlinuz="$_bd_cand"
+        break
+    done
     # Merged-usr .debs ship modules under /usr/lib/modules; older ones under /lib.
-    _bd_moddir=$(ls -1d "$_bd_kroot"/usr/lib/modules/*/ "$_bd_kroot"/lib/modules/*/ 2>/dev/null | head -n1)
+    _bd_moddir=
+    for _bd_cand in "$_bd_kroot"/usr/lib/modules/*/ "$_bd_kroot"/lib/modules/*/; do
+        [ -d "$_bd_cand" ] || continue
+        _bd_moddir="$_bd_cand"
+        break
+    done
     if [ -z "$_bd_vmlinuz" ] || [ -z "$_bd_moddir" ]; then
         rm -rf "$_bd_work"
         qemu_warn "kernel .deb missing vmlinuz or /lib/modules"

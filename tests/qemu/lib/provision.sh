@@ -15,7 +15,7 @@ qemu_stage_install() {
 _qemu_provision_stamp_key() {
     # Bump the leading token when the provision strategy changes (e.g. fuse2fs).
     {
-        echo fuse2fs-v10-timesync-stamp
+        echo fuse2fs-v11-timesync-stamp
         sha256sum "$QEMU_REPO/src/rpi-preseed" \
             "$QEMU_REPO/tests/qemu/probe/collect.sh" \
             "$QEMU_REPO/tests/qemu/probe/rpi-preseed-probe.service" \
@@ -24,7 +24,7 @@ _qemu_provision_stamp_key() {
         if [ -n "${QEMU_KERNEL:-}" ]; then
             _qpsk_ver=$(basename -- "$QEMU_KERNEL" | sed 's/^vmlinuz-//')
             printf 'modules:%s\n' "$_qpsk_ver"
-            ls "/lib/modules/$_qpsk_ver/modules.dep" 2>/dev/null | sha256sum
+            sha256sum "/lib/modules/$_qpsk_ver/modules.dep" 2>/dev/null
         fi
     } | sha256sum | awk '{print $1}'
 }
