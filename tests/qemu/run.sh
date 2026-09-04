@@ -65,6 +65,12 @@ _qemu_run_scenario() {
     QEMU_NO_NETWORK=0
     QEMU_NET_RESTRICT=0
     QEMU_ALLOW_FAIL=0
+    # Every scenario is sourced into this one shell, so resetting the variables
+    # above is only half the job: a hook a previous scenario defined is still
+    # defined here. 40-network-partition inherited 30-power-cut's hook and had
+    # its apply killed mid-run, which reads as "probe did not write results"
+    # -- a failure that appears only in a full run and never standalone.
+    unset -f scenario_fault_pre 2>/dev/null || true
 
     if [ -f "$_qs_dir/fault.sh" ]; then
         # shellcheck disable=SC1091
