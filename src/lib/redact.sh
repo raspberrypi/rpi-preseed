@@ -11,8 +11,8 @@ REDACT_SECRET_TOKEN='***REDACTED***'
 redact_salt() {
     if [ ! -f "$SALT_FILE" ]; then
         ensure_dir "$STATE_DIR" 755 || return 1
-        head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$SALT_FILE"
-        chmod 600 "$SALT_FILE" 2>/dev/null || true
+        head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n' \
+            | atomic_write "$SALT_FILE" 600
     fi
     cat "$SALT_FILE"
 }
