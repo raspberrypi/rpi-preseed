@@ -11,6 +11,13 @@
 # Internal (invoked by systemd units):
 #   apply-base | apply-runcmd-early | apply-runcmd-late
 
+# Deterministic permissions for everything an apply creates. The service starts
+# with whatever umask it inherits, and a plain redirection carries that straight
+# onto the file, so a re-apply from an interactive shell used to leave files like
+# config.txt group-writable while the same run from systemd left them 644.
+# atomic_write settles its own modes; this covers the appends and log files.
+umask 022
+
 RPI_PRESEED_VERSION="0.1.0-prototype"
 RPI_PRESEED_MAJOR=1
 RPI_PRESEED_MINOR=1
