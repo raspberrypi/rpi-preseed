@@ -16,7 +16,7 @@ apply_time() {
         printf '[Time]\n'
         [ -n "$_at_ntp" ] && printf 'NTP=%s\n' "$_at_ntp"
         [ -n "$_at_fb" ] && printf 'FallbackNTP=%s\n' "$_at_fb"
-    } | atomic_write "$_at_dir/10-rpi-preseed.conf"
+    } | atomic_write "$_at_dir/10-rpi-preseed.conf" 644
 
     if helpers_live && have systemctl; then
         systemctl try-restart systemd-timesyncd >/dev/null 2>&1 || true

@@ -9,7 +9,7 @@ apply_locale() {
         if imager_available; then
             report_run locale.timezone imager_custom "$IMAGER_CUSTOM" set_timezone "$_al_tz"
         else
-            printf '%s\n' "$_al_tz" | atomic_write "$(target_path /etc/timezone)"
+            printf '%s\n' "$_al_tz" | atomic_write "$(target_path /etc/timezone)" 644
             report_key locale.timezone applied fallback
         fi
         _al_did=1
@@ -54,7 +54,7 @@ _apply_keyboard() {
         printf 'XKBVARIANT="%s"\n' "$_ak_variant"
         printf 'XKBOPTIONS="%s"\n' "$_ak_options"
         printf 'BACKSPACE="guess"\n'
-    } | atomic_write "$(target_path /etc/default/keyboard)"
+    } | atomic_write "$(target_path /etc/default/keyboard)" 644
     _apply_labwc_keyboard
     report_key locale.keymap applied "fallback"
 }
@@ -104,7 +104,7 @@ _labwc_env_write() {
         printf 'XKB_DEFAULT_LAYOUT=%s\n' "$_ak_layout"
         printf 'XKB_DEFAULT_VARIANT=%s\n' "$_ak_variant"
         printf 'XKB_DEFAULT_OPTIONS=%s\n' "$_ak_options"
-    } | atomic_write "$_lew_file"
+    } | atomic_write "$_lew_file" 644
     if helpers_live && [ -n "$_lew_owner" ]; then
         chown "$_lew_owner:$_lew_owner" "$_lew_file" 2>/dev/null || true
     fi
@@ -127,7 +127,7 @@ _apply_locales() {
         printf 'LANG=%s\n' "$_al_lang"
         toml_present locale.lc_time && printf 'LC_TIME=%s\n' "$(toml_get locale.lc_time)"
         toml_present locale.lc_measurement && printf 'LC_MEASUREMENT=%s\n' "$(toml_get locale.lc_measurement)"
-    } | atomic_write "$(target_path /etc/default/locale)"
+    } | atomic_write "$(target_path /etc/default/locale)" 644
     if helpers_live && have locale-gen; then
         locale-gen >/dev/null 2>&1 || true
     fi
