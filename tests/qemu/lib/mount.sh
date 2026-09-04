@@ -41,8 +41,13 @@ qemu_part_start_sectors() {
     # MBR partition table: entry N at offset 446 + (N-1)*16; LBA start at +8 (u32 LE).
     _qps_off=$((446 + (_qps_n - 1) * 16 + 8))
     _qps_start=$(dd if="$_qps_map" bs=1 skip="$_qps_off" count=4 2>/dev/null | od -An -tu4 | tr -d ' \n')
-    [ -n "$_qps_start" ] && [ "$_qps_start" -gt 0 ] 2>/dev/null || \
-        qemu_die "could not parse partition $_qps_n start from MBR of $_qps_map"
+    # Proved to be digits before being compared as a number: od prints nothing
+    # at all for a short read, and -gt on a non-number is an error, not a false.
+    _qps_bad="could not parse partition $_qps_n start from MBR of $_qps_map"
+    case "$_qps_start" in
+        ''|*[!0-9]*) qemu_die "$_qps_bad" ;;
+    esac
+    [ "$_qps_start" -gt 0 ] || qemu_die "$_qps_bad"
     printf '%s' "$_qps_start"
 }
 

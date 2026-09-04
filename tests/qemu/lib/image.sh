@@ -150,7 +150,10 @@ _qemu_grow_image() {
 _qemu_pick_host_virt_kernel() {
     _phk_k=
     _phk_i=
-    for _phk_cand in $(ls -1 /boot/vmlinuz-*-arm64 2>/dev/null | sort -V); do
+    # Version-sorted, and the loop keeps the last match, so the newest kernel
+    # with a matching initrd wins.
+    for _phk_cand in $(printf '%s\n' /boot/vmlinuz-*-arm64 | sort -V); do
+        [ -f "$_phk_cand" ] || continue
         case "$_phk_cand" in
             *rpt*) continue ;;
         esac
