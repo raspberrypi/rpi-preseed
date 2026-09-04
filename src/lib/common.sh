@@ -51,15 +51,39 @@ ensure_dir() {
     return 0
 }
 
-# atomic_write PATH — read stdin, write to PATH atomically (temp -> fsync -> mv).
-# The rename is atomic on the same filesystem, so readers never see a partial file
-# and an interrupted write leaves the previous contents intact.
+# atomic_write PATH [MODE] — read stdin, write to PATH atomically (temp -> fsync
+# -> mv). The rename is atomic on the same filesystem, so readers never see a
+# partial file and an interrupted write leaves the previous contents intact.
+#
+# Permissions are settled on the temp file, before the rename, so the content is
+# never briefly visible at the wrong mode. mktemp creates 0600 whatever the umask
+# is and mv carries that onto the destination, so replacing a packaged file used
+# to quietly lock out every reader but root -- which is how a rewritten
+# /etc/default/keyboard stopped wayvnc starting (issue #5).
+#
+# MODE, when given, always wins: a caller writing a secret gets its 600 from the
+# moment the file appears rather than a chmod afterwards, and one rewriting a
+# file it owns outright repairs a mode an older version got wrong. Without MODE
+# an existing destination keeps the mode and ownership it already had, which is
+# what an applier editing someone else's file should do, and a new one lands 644.
+# stat(1) rather than chmod --reference so this also holds under busybox.
 atomic_write() {
     _aw_path="$1"
+    _aw_mode="${2:-}"
     _aw_dir=$(dirname "$_aw_path")
     ensure_dir "$_aw_dir" || return 1
     _aw_tmp=$(mktemp "$_aw_dir/.tmp.XXXXXX") || return 1
     cat >"$_aw_tmp" || { rm -f "$_aw_tmp"; return 1; }
+    if [ -n "$_aw_mode" ]; then
+        chmod "$_aw_mode" "$_aw_tmp" 2>/dev/null || true
+    elif [ -e "$_aw_path" ]; then
+        _aw_keep=$(stat -c '%a' "$_aw_path" 2>/dev/null) || _aw_keep=
+        [ -n "$_aw_keep" ] && { chmod "$_aw_keep" "$_aw_tmp" 2>/dev/null || true; }
+        _aw_own=$(stat -c '%u:%g' "$_aw_path" 2>/dev/null) || _aw_own=
+        [ -n "$_aw_own" ] && { chown "$_aw_own" "$_aw_tmp" 2>/dev/null || true; }
+    else
+        chmod 644 "$_aw_tmp" 2>/dev/null || true
+    fi
     # Best-effort durability; sync(1) is always available even if fsync isn't.
     sync "$_aw_tmp" 2>/dev/null || sync
     mv -f "$_aw_tmp" "$_aw_path" || { rm -f "$_aw_tmp"; return 1; }

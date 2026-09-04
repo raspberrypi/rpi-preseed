@@ -67,8 +67,7 @@ apply_user() {
 
     if toml_bool user.passwordless_sudo false; then
         _au_sudo=$(target_path "/etc/sudoers.d/010_${_au_new}-nopasswd")
-        printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$_au_new" | atomic_write "$_au_sudo"
-        chmod 440 "$_au_sudo" 2>/dev/null || true
+        printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$_au_new" | atomic_write "$_au_sudo" 440
         report_key user.passwordless_sudo applied
     fi
 

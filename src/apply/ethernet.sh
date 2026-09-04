@@ -20,8 +20,7 @@ apply_ethernet() {
         printf '\n[ethernet]\n\n'
         _apply_ethernet_ipv4 "$_ae_method"
         _apply_ethernet_ipv6 "$_ae_method"
-    } | atomic_write "$_ae_file"
-    chmod 600 "$_ae_file" 2>/dev/null || true
+    } | atomic_write "$_ae_file" 600
     report_key ethernet.method applied networkmanager
     log_info "ethernet connection written ($_ae_method)"
     return 0
