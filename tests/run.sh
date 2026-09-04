@@ -43,6 +43,8 @@ assert_file()      { if [ -f "$2" ]; then ok "$1"; else no "$1 (no file: $2)"; f
 . "$REPO/tests/test_hash.sh"
 # shellcheck source=tests/test_ownership.sh
 . "$REPO/tests/test_ownership.sh"
+# shellcheck source=tests/test_modes.sh
+. "$REPO/tests/test_modes.sh"
 # shellcheck source=tests/test_integration.sh
 . "$REPO/tests/test_integration.sh"
 
@@ -52,6 +54,8 @@ echo "== redact =="      ; t_redact
 echo "== hash =="        ; t_hash
 echo "== ownership =="   ; t_ownership
 echo "== home files ==" ; t_home_artefacts
+echo "== modes =="        ; t_modes
+echo "== written files ==" ; t_written_modes
 echo "== integration ==" ; t_integration
 
 echo "-------------------------------------"
