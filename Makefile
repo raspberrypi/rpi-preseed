@@ -39,7 +39,7 @@ check: shellcheck test
 
 shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not installed; skipping"; exit 0; }
-	shellcheck -x $(SCRIPTS) tests/run.sh tests/test_toml.sh tests/test_validate.sh tests/test_redact.sh tests/test_hash.sh tests/test_integration.sh
+	shellcheck -x $(SCRIPTS) tests/run.sh tests/test_toml.sh tests/test_validate.sh tests/test_redact.sh tests/test_hash.sh tests/test_ownership.sh tests/test_modes.sh tests/test_integration.sh
 	shellcheck -x $(QEMU_SCRIPTS)
 	@echo "shellcheck OK"
 
