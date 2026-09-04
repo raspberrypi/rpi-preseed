@@ -32,9 +32,9 @@ _apply_ssh_fallback() {
     fi
     _asf_sshd=$(target_path /etc/ssh/sshd_config.d/rpi-preseed.conf)
     if toml_bool ssh.password_authentication false; then
-        printf 'PasswordAuthentication yes\n' | atomic_write "$_asf_sshd"
+        printf 'PasswordAuthentication yes\n' | atomic_write "$_asf_sshd" 644
     else
-        printf 'PasswordAuthentication no\n' | atomic_write "$_asf_sshd"
+        printf 'PasswordAuthentication no\n' | atomic_write "$_asf_sshd" 644
     fi
     report_key ssh.password_authentication applied "fallback"
 
