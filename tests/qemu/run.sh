@@ -141,7 +141,8 @@ _qemu_run_scenario() {
     fi
 
     QEMU_RESULTS_DIR="$_qs_results"
-    export QEMU_RESULTS_DIR
+    QEMU_SCENARIO_IMAGE="$_qs_img"
+    export QEMU_RESULTS_DIR QEMU_SCENARIO_IMAGE
     # shellcheck disable=SC1091
     . "$_qs_dir/expect.sh"
     return 0

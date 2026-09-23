@@ -103,6 +103,8 @@ _ch_home=$(getent passwd 1000 2>/dev/null | cut -d: -f6)
     fi
 } >"$OUT/home-artefacts.txt"
 [ -f /boot/firmware/rpi-preseed.toml ] && cp -a /boot/firmware/rpi-preseed.toml "$OUT/config.toml"
+_nm=/etc/NetworkManager/system-connections/preconfigured.nmconnection
+[ -f "$_nm" ] && cp -a "$_nm" "$OUT/preconfigured.nmconnection"
 
 if command -v journalctl >/dev/null 2>&1; then
     journalctl -u 'rpi-preseed*' --no-pager >"$OUT/journal.txt" 2>/dev/null || true

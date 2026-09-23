@@ -20,6 +20,10 @@ enabled = true
 mode = "token"
 token = "qemu-not-a-real-token"
 
+[wlan]
+ssid = "QemuNet"
+password = "qemu-wifi-passphrase"
+
 [locale]
 keymap = "gb"
 timezone = "Europe/London"

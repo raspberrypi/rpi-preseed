@@ -53,6 +53,23 @@ qemu_assert_ncontains() {
     fi
 }
 
+# qemu_assert_boot_partition DESC IMAGE has|lacks STRING — whether STRING is in
+# the raw bytes of the FAT boot partition, freed clusters included.
+qemu_assert_boot_partition() {
+    qemu_disk_map "$2"
+    _qbp_start=$(qemu_part_start_sectors "$QEMU_DISK_MAP" 1)
+    _qbp_size=$(qemu_part_size_sectors "$QEMU_DISK_MAP" 1)
+    _qbp_found=0
+    dd if="$QEMU_DISK_MAP" bs=512 skip="$_qbp_start" count="$_qbp_size" status=none 2>/dev/null \
+        | grep -qaF -- "$4" && _qbp_found=1
+    qemu_disk_unmap
+    case "$3:$_qbp_found" in
+        has:1|lacks:0) ok "$1" ;;
+        has:0) no "$1 (missing [$4] from the boot partition)" ;;
+        *)     no "$1 (found [$4] on the boot partition)" ;;
+    esac
+}
+
 qemu_assert_stamp() {
     _as_name="$1"
     _as_dir="$2"

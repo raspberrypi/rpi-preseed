@@ -27,3 +27,13 @@ qemu_assert_ncontains "token value stays out of the report" \
     "$QEMU_RESULTS_DIR/report.json" "qemu-not-a-real-token"
 qemu_assert_contains "units skipped on an image without rpi-connect" \
     "$QEMU_RESULTS_DIR/report.json" "rpi-connect units not present"
+
+# Secrets are consumed into the target, then burnt off the boot partition:
+# redacted in the file, and absent from its raw bytes, freed clusters included.
+qemu_assert_contains "passphrase consumed into the connection" \
+    "$QEMU_RESULTS_DIR/preconfigured.nmconnection" "psk=qemu-wifi-passphrase"
+qemu_assert_contains "config source redacted" "$QEMU_RESULTS_DIR/config.toml" "<redacted by rpi-preseed>"
+qemu_assert_boot_partition "boot partition is readable raw" "$QEMU_SCENARIO_IMAGE" has 'ssid = "QemuNet"'
+qemu_assert_boot_partition "passphrase burnt off the boot partition" "$QEMU_SCENARIO_IMAGE" lacks "qemu-wifi-passphrase"
+qemu_assert_boot_partition "account password burnt off the boot partition" "$QEMU_SCENARIO_IMAGE" lacks 'password = "changeme"'
+qemu_assert_boot_partition "Connect token burnt off the boot partition" "$QEMU_SCENARIO_IMAGE" lacks "qemu-not-a-real-token"
