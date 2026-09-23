@@ -135,8 +135,17 @@ _base_fail() {
 # redact_config_secrets FILE — blank secret values in the config, if writable.
 redact_config_secrets() {
     [ -w "$1" ] || { log_warn "config source read-only; skipping secret redaction"; return 0; }
-    sed -i -E 's/^([[:space:]]*)(password|token)([[:space:]]*=[[:space:]]*).*/\1\2\3"'"$REDACTED_SECRET"'"/' "$1" \
-        && log_info "redacted secrets in config source"
+    _rcs_tmp=$(mktemp) || return 1
+    sed -E 's/^([[:space:]]*)(password|token)([[:space:]]*=[[:space:]]*).*/\1\2\3"'"$REDACTED_SECRET"'"/' "$1" >"$_rcs_tmp" \
+        || { rm -f "$_rcs_tmp"; return 1; }
+    if ! cmp -s "$_rcs_tmp" "$1"; then
+        if burn_rewrite "$1" "$_rcs_tmp"; then
+            log_info "redacted secrets in config source"
+        else
+            log_warn "could not redact secrets in config source"
+        fi
+    fi
+    rm -f "$_rcs_tmp"
 }
 
 # --- Runcmd phases -----------------------------------------------------------

@@ -75,6 +75,19 @@ atomic_write() {
     return 0
 }
 
+# burn_rewrite PATH NEW — give PATH the contents of NEW, zeroing PATH's own
+# blocks first. FAT overwrites in place, so this reaches the clusters that held
+# the old contents; atomic_write's rename would free them with a secret intact.
+burn_rewrite() {
+    _br_size=$(wc -c <"$1") || return 1
+    if [ "$_br_size" -gt 0 ]; then
+        dd if=/dev/zero of="$1" bs="$_br_size" count=1 conv=notrunc,fsync \
+            status=none || return 1
+    fi
+    cat "$2" >"$1" || return 1
+    sync "$1" 2>/dev/null || sync
+}
+
 # user_ids USER — "uid:gid" for USER on the target, empty when not found.
 user_ids() {
     if [ -z "$RPI_PRESEED_ROOT" ]; then
