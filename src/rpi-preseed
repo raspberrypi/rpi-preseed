@@ -116,6 +116,8 @@ do_base() {
     apply_boot
 
     redact_config_secrets "$_db_cfg"
+    # Stamp the redacted file, or every later boot reports it as changed.
+    CONFIG_FINGERPRINT=$(config_fingerprint "$_db_cfg"); export CONFIG_FINGERPRINT
     write_stamp "$STAMP_APPLIED"
     rm -f "$STAMP_FAILED"
     report_write applied
@@ -133,7 +135,7 @@ _base_fail() {
 # redact_config_secrets FILE — blank secret values in the config, if writable.
 redact_config_secrets() {
     [ -w "$1" ] || { log_warn "config source read-only; skipping secret redaction"; return 0; }
-    sed -i -E 's/^([[:space:]]*)(password|token)([[:space:]]*=[[:space:]]*).*/\1\2\3"<redacted by rpi-preseed>"/' "$1" \
+    sed -i -E 's/^([[:space:]]*)(password|token)([[:space:]]*=[[:space:]]*).*/\1\2\3"'"$REDACTED_SECRET"'"/' "$1" \
         && log_info "redacted secrets in config source"
 }
 

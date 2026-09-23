@@ -33,7 +33,10 @@ apply_user() {
     _au_hash=""
     if toml_present user.password; then
         _au_pass=$(toml_get user.password)
-        if toml_bool user.password_encrypted false; then
+        if is_redacted "$_au_pass"; then
+            # Empty hash leaves the password set last time alone.
+            report_key user.password skipped "consumed by an earlier apply"
+        elif toml_bool user.password_encrypted false; then
             _au_hash="$_au_pass"
         else
             if ! _au_hash=$(hash_password "$_au_pass"); then
