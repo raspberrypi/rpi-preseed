@@ -38,6 +38,13 @@ _qemu_provision_stamp_key() {
 # uname. Deleting it (64M) frees room for the boot kernel's full tree (~166M) on
 # the tight, ungrowable Pi OS Lite rootfs (host e2fsprogs 1.46 can't resize the
 # trixie ext4). QEMU_KERNEL_MODULES already carries depmod-generated dep tables.
+# _qemu_copy_into_guest SRC DST — cp -a without the xattr copy. fuse2fs 1.47
+# refuses a system.posix_acl_access set on the image's root-owned directories,
+# and cp -a (coreutils 9.7) then exits 1 without a message.
+_qemu_copy_into_guest() {
+    cp -R --preserve=mode,timestamps,links "$1" "$2"
+}
+
 _qemu_install_virt_modules() {
     _qiv_mnt="$1"
     _qiv_ver="${QEMU_KERNEL_UNAME:-}"
@@ -54,7 +61,7 @@ _qemu_install_virt_modules() {
     fi
     qemu_info "installing $_qiv_ver kernel modules into guest (full tree)..."
     mkdir -p "$_qiv_mnt/lib/modules"
-    if ! cp -a "$_qiv_src" "$_qiv_mnt/lib/modules/$_qiv_ver"; then
+    if ! _qemu_copy_into_guest "$_qiv_src" "$_qiv_mnt/lib/modules/$_qiv_ver"; then
         qemu_warn "failed to copy module tree into guest; some modules may be missing"
     fi
 
@@ -241,8 +248,8 @@ qemu_prepare_provisioned_image() {
              "$QEMU_ROOTFS_MNT/lib" \
              "$QEMU_ROOTFS_MNT/usr/local/lib"
 
-    cp -a "$_qppi_stage/usr/." "$QEMU_ROOTFS_MNT/usr/"
-    cp -a "$_qppi_stage/lib/." "$QEMU_ROOTFS_MNT/lib/"
+    _qemu_copy_into_guest "$_qppi_stage/usr/." "$QEMU_ROOTFS_MNT/usr/"
+    _qemu_copy_into_guest "$_qppi_stage/lib/." "$QEMU_ROOTFS_MNT/lib/"
 
     _qemu_install_virt_modules "$QEMU_ROOTFS_MNT"
     _qemu_patch_fstab_for_virt "$QEMU_ROOTFS_MNT"
