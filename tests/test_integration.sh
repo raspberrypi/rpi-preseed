@@ -128,6 +128,36 @@ EOF
     assert_ncontains "secret absent from report.json" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" "SUPERSECRETPSK"
     assert_ncontains "ssid pii absent from breadcrumb" "$(cat "$ROOT/boot/firmware/rpi-preseed/status.txt" 2>/dev/null)" "RedactNet"
     assert_contains "wlan honours WPA3 sae key-mgmt" "$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)" "key-mgmt=sae"
+
+    # --- The redacted file is what was stamped: the next boot is quiet ---
+    _ti_err=$(rpp apply-base 2>&1 >/dev/null)
+    assert_ncontains "redacted config not reported as changed" "$_ti_err" "config changed"
+
+    # --- A forced re-apply keeps the consumed secrets ---
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_nm=$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)
+    assert_contains "re-apply keeps the consumed psk" "$_ti_nm" "psk=SUPERSECRETPSK"
+    assert_ncontains "re-apply does not write the marker as psk" "$_ti_nm" "redacted"
+    rm -rf "$ROOT"
+
+    # --- A consumed account password is not re-applied (separate sandbox) ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    echo "pi:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[user]
+name = "pi"
+password = "$5$salt$FIRSTHASH"
+password_encrypted = true
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "account hash applied" "$(cat "$ROOT/etc/shadow")" "FIRSTHASH"
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "re-apply keeps the account hash" "$(cat "$ROOT/etc/shadow")" "FIRSTHASH"
+    assert_ncontains "re-apply does not set the marker as hash" "$(cat "$ROOT/etc/shadow")" "redacted"
     rm -rf "$ROOT"
 
     # --- Open SSID: no password, no [wifi-security] block (separate sandbox) ---

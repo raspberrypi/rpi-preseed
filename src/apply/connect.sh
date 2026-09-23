@@ -18,7 +18,9 @@ apply_connect() {
     [ -n "$_ac_home" ] || _ac_home="/home/$_ac_user"
     _ac_home=$(target_path "$_ac_home")
 
-    if [ "$_ac_mode" = token ]; then
+    if [ "$_ac_mode" = token ] && is_redacted "$(toml_get connect.token)"; then
+        report_key connect.token skipped "consumed by an earlier apply"
+    elif [ "$_ac_mode" = token ]; then
         _ac_token=$(toml_get connect.token)
         _ac_dir="$_ac_home/.config/com.raspberrypi.connect"
         ensure_dir "$_ac_dir" 700

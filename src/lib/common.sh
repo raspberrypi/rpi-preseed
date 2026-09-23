@@ -33,7 +33,16 @@ STAMP_FAILED="$STATE_DIR/apply-failed"
 DEFAULT_CONFIG="$RPI_PRESEED_BOOT_DIR/rpi-preseed.toml"
 LEGACY_CONFIG="$RPI_PRESEED_LEGACY_BOOT_DIR/rpi-preseed.toml"
 
+# What a secret in the config source is replaced with once it has been applied.
+REDACTED_SECRET='<redacted by rpi-preseed>'
+
 # --- Small utilities -----------------------------------------------------------
+
+# is_redacted VALUE — true if VALUE is a secret already consumed by an earlier
+# apply. Applying it would overwrite the real secret with the marker.
+is_redacted() {
+    [ "$1" = "$REDACTED_SECRET" ]
+}
 
 # is_true VALUE — treat the common truthy spellings as true.
 is_true() {

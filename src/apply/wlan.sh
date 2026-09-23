@@ -7,6 +7,13 @@ apply_wlan() {
     _aw_country=$(toml_get_default wlan.country "")
     _aw_km=$(wlan_key_mgmt)
 
+    # The passphrase now exists only in the connection written last time.
+    if is_redacted "$_aw_pass"; then
+        report_key wlan.password skipped "consumed by an earlier apply"
+        [ -n "$_aw_country" ] && _apply_wlan_country "$_aw_country"
+        return 0
+    fi
+
     # A non-UTF-8 SSID arrives hex-encoded in wlan.ssid_hex (a TOML string can
     # only carry valid UTF-8). Decode it to a NetworkManager byte-array.
     # wlan.ssid_hex takes precedence over wlan.ssid.
