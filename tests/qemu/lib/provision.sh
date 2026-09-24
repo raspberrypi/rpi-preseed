@@ -78,11 +78,14 @@ _qemu_patch_fstab_for_virt() {
     [ -f "$_qpf_fstab" ] || return 0
     # Prefer /dev/vdaN (stable under -M virt) and nofail so a transient mount flake
     # does not drop the guest into emergency mode.
+    # Not sed -i: its rename trips the same ACL refusal as cp -a.
     if grep -q 'boot/firmware' "$_qpf_fstab"; then
-        sed -i \
-            -e 's|^PARTUUID=[^ ]*[ ]*/boot/firmware[ ]*vfat[ ].*|/dev/vda1  /boot/firmware  vfat    defaults,nofail  0       2|' \
+        _qpf_tmp=$(mktemp)
+        sed -e 's|^PARTUUID=[^ ]*[ ]*/boot/firmware[ ]*vfat[ ].*|/dev/vda1  /boot/firmware  vfat    defaults,nofail  0       2|' \
             -e 's|^PARTUUID=[^ ]*[ ]*/[ ]*ext4[ ].*|/dev/vda2  /               ext4    defaults,noatime  0       1|' \
-            "$_qpf_fstab" 2>/dev/null || true
+            "$_qpf_fstab" >"$_qpf_tmp"
+        cat "$_qpf_tmp" >"$_qpf_fstab"
+        rm -f "$_qpf_tmp"
     fi
     # Ensure vfat is attempted early.
     mkdir -p "$_qpf_mnt/etc/modules-load.d"
