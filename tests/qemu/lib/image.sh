@@ -97,51 +97,26 @@ qemu_clone_scenario() {
     fi
 }
 
+# _qemu_grow_image IMAGE — add 1G, grow partition 2, then ext4 into it. The
+# kernel's module tree does not fit otherwise. resize2fs is pointed at a FUSE
+# export of just the partition, so this needs no losetup and no root.
 _qemu_grow_image() {
     _qg_img="$1"
     qemu_info "growing image by 1G for virt test headroom..."
-    if ! qemu_have qemu-img; then
-        qemu_warn "qemu-img not found; skipping image grow"
-        return 0
-    fi
-    qemu-img resize "$_qg_img" +1G 2>/dev/null || true
-    if qemu_have sfdisk; then
-        printf ',+\n' | sfdisk --force --no-reread -N 2 "$_qg_img" >/dev/null 2>&1 || \
-            qemu_warn "sfdisk partition grow failed"
-    fi
+    qemu-img resize -f raw "$_qg_img" +1G >/dev/null
+    printf ',+\n' | sfdisk --force --no-reread -N 2 "$_qg_img" >/dev/null 2>&1 || \
+        qemu_die "sfdisk could not grow partition 2 of $_qg_img"
     _qg_start=$(qemu_part_start_sectors "$_qg_img" 2)
-    _qg_off=$((_qg_start * 512))
-    _qg_resized=0
-    if qemu_have losetup && qemu_have resize2fs && qemu_have e2fsck; then
-        _qg_loop=$(losetup -f --show -o "$_qg_off" "$_qg_img" 2>/dev/null || true)
-        if [ -n "$_qg_loop" ] && [ -b "$_qg_loop" ]; then
-            e2fsck -f -p "$_qg_loop" >/dev/null 2>&1 || e2fsck -f -y "$_qg_loop" >/dev/null 2>&1 || true
-            if resize2fs "$_qg_loop" >/dev/null 2>&1; then
-                _qg_resized=1
-                qemu_info "expanded ext4 rootfs on partition 2"
-            else
-                qemu_warn "resize2fs on loop device failed; rootfs may still be full"
-            fi
-            losetup -d "$_qg_loop" 2>/dev/null || true
-        else
-            qemu_warn "losetup unavailable (need root/CAP_SYS_ADMIN); trying fuse2fs resize"
-        fi
+    _qg_size=$(qemu_part_size_sectors "$_qg_img" 2) || \
+        qemu_die "could not read partition 2 size of $_qg_img"
+    qemu_disk_map "$_qg_img" "$((_qg_start * 512))" "$((_qg_size * 512))"
+    e2fsck -f -p "$QEMU_DISK_MAP" >/dev/null 2>&1 || e2fsck -f -y "$QEMU_DISK_MAP" >/dev/null 2>&1 || true
+    if ! resize2fs "$QEMU_DISK_MAP" >/dev/null 2>&1; then
+        qemu_disk_unmap
+        qemu_die "resize2fs could not grow the rootfs of $_qg_img"
     fi
-    if [ "$_qg_resized" -eq 0 ] && qemu_have fuse2fs && qemu_have resize2fs; then
-        _qg_mnt=$(mktemp -d)
-        if fuse2fs -o "offset=$_qg_off,fakeroot,rw" "$_qg_img" "$_qg_mnt" 2>/dev/null; then
-            # resize2fs needs a block device, not a FUSE mount point — warn only.
-            qemu_warn "fuse2fs mount ok but resize2fs needs losetup; rootfs may still be full"
-            if qemu_have fusermount3; then
-                fusermount3 -u "$_qg_mnt" 2>/dev/null || true
-            elif qemu_have fusermount; then
-                fusermount -u "$_qg_mnt" 2>/dev/null || true
-            fi
-        else
-            qemu_warn "fuse2fs grow mount failed; rootfs may still be full"
-        fi
-        rmdir "$_qg_mnt" 2>/dev/null || true
-    fi
+    qemu_disk_unmap
+    qemu_info "expanded ext4 rootfs on partition 2"
 }
 
 # _qemu_pick_host_virt_kernel — prefer Debian linux-image-arm64 (has virtio).
@@ -327,8 +302,8 @@ qemu_prepare_image() {
         qemu_info "using cached decompressed source.img"
     fi
 
-    qemu_info "copying source.img -> prepared.img"
-    cp -f "$_qpi_tmp" "$_qpi_prepared"
+    qemu_info "moving source.img -> prepared.img"
+    mv -f "$_qpi_tmp" "$_qpi_prepared"
     _qemu_grow_image "$_qpi_prepared"
     touch "$_qpi_cache_dir/grown.stamp"
 
