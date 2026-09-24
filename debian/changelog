@@ -1,3 +1,18 @@
+rpi-preseed (0.2.0) UNRELEASED; urgency=medium
+
+  * Keep file modes across atomic writes and settle them without consulting
+    the caller's umask, repairing modes an older version got wrong.
+  * Hand files written into a home to the user who owns it.
+  * Make Connect enrolment survive the boot it is applied on.
+  * Make ssh authorized_keys reach the device.
+  * Leave consumed secrets alone on re-apply, and burn the config's blocks
+    in place instead of renaming over them.
+  * Stop a bracket inside a command string closing a TOML array.
+  * Extend the qemu integration suite to cover file modes, home ownership
+    and burnt secrets on the boot partition.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 24 Sep 2026 15:10:00 +0100
+
 rpi-preseed (0.1.0) UNRELEASED; urgency=medium
 
   * Initial prototype: TOML-driven first-boot customisation via booted systemd
