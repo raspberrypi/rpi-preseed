@@ -140,19 +140,26 @@ qemu_disk_unmap() {
     fi
     if [ -n "${QEMU_DISK_MAP_PID:-}" ]; then
         kill "$QEMU_DISK_MAP_PID" 2>/dev/null || true
+        # After a large write it is still flushing the qcow2 on exit, which
+        # on an SD card takes seconds. SIGKILL then would leave the overlay
+        # torn and the export mounted.
         _qdu_i=0
         while kill -0 "$QEMU_DISK_MAP_PID" 2>/dev/null; do
-            if [ "$_qdu_i" -ge 20 ]; then
+            if [ "$_qdu_i" -ge 1200 ]; then
+                qemu_warn "qemu-storage-daemon did not exit; killing it"
                 kill -9 "$QEMU_DISK_MAP_PID" 2>/dev/null || true
                 break
             fi
-            sleep 0.05 2>/dev/null || sleep 1
+            sleep 0.1 2>/dev/null || sleep 1
             _qdu_i=$((_qdu_i + 1))
         done
         wait "$QEMU_DISK_MAP_PID" 2>/dev/null || true
         QEMU_DISK_MAP_PID=
     fi
     if [ -n "${QEMU_DISK_MAP_FILE:-}" ]; then
+        # A daemon that died uncleanly leaves its export mounted over the file.
+        fusermount3 -uz "$QEMU_DISK_MAP_FILE" 2>/dev/null || \
+            fusermount -uz "$QEMU_DISK_MAP_FILE" 2>/dev/null || true
         rm -f "$QEMU_DISK_MAP_FILE"
         QEMU_DISK_MAP_FILE=
     fi
