@@ -4,6 +4,9 @@
 
 set -eu
 
+# sfdisk, e2fsck, resize2fs and mkinitramfs live here on Debian.
+PATH="$PATH:/usr/sbin:/sbin"
+
 QEMU_TESTS=$(cd -- "$(dirname -- "$0")" && pwd)
 QEMU_REPO=$(cd -- "$QEMU_TESTS/../.." && pwd)
 export QEMU_TESTS QEMU_REPO

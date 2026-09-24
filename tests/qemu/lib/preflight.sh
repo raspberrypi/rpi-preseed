@@ -9,7 +9,7 @@ qemu_preflight() {
         _pf_ok=1
     fi
 
-    for _pf_cmd in fuse2fs qemu-img qemu-storage-daemon mcopy mkinitramfs; do
+    for _pf_cmd in fuse2fs qemu-img qemu-storage-daemon mcopy mkinitramfs sfdisk e2fsck resize2fs; do
         if ! qemu_have "$_pf_cmd"; then
             case "$_pf_cmd" in
                 fuse2fs) qemu_warn "fuse2fs not found (apt install fuse2fs)" ;;
