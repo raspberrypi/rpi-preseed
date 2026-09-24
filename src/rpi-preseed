@@ -18,7 +18,7 @@
 # atomic_write settles its own modes; this covers the appends and log files.
 umask 022
 
-RPI_PRESEED_VERSION="0.1.0-prototype"
+RPI_PRESEED_VERSION="0.2.0-prototype"
 RPI_PRESEED_MAJOR=1
 RPI_PRESEED_MINOR=1
 export RPI_PRESEED_VERSION RPI_PRESEED_MAJOR RPI_PRESEED_MINOR
