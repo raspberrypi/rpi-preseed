@@ -90,7 +90,7 @@ _apply_wlan_nm() {
         case "$_awf_km" in
             none) : ;;
             owe)  printf '[wifi-security]\nkey-mgmt=owe\n\n' ;;
-            *)    printf '[wifi-security]\nkey-mgmt=%s\npsk=%s\n\n' "$_awf_km" "$_awf_pass" ;;
+            *)    printf '[wifi-security]\nkey-mgmt=%s\npsk=%s\n\n' "$_awf_km" "$(keyfile_escape "$_awf_pass")" ;;
         esac
         printf '[ipv4]\nmethod=auto\n\n[ipv6]\naddr-gen-mode=default\nmethod=auto\n'
     } | atomic_write "$_awf_file" 600
