@@ -267,6 +267,13 @@ target_path() {
     printf '%s%s' "$RPI_PRESEED_ROOT" "$1"
 }
 
+# keyfile_escape VALUE — VALUE as a GLib key-file string. NetworkManager
+# unescapes on load, so a raw "\s" becomes a space, "\d" voids the key and a
+# leading space is dropped.
+keyfile_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/	/\\t/g' -e 's/^ /\\s/'
+}
+
 # hex_to_nm_bytes HEX — convert a hex-encoded SSID to a NetworkManager keyfile
 # byte-array ("b1;b2;...;", decimal octets). Used for exotic, non-UTF-8 SSIDs
 # that cannot be represented as a UTF-8 TOML/keyfile string. Returns non-zero on

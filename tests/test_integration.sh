@@ -177,6 +177,22 @@ EOF
     assert_ncontains "open network has no psk" "$_ti_nm" "psk="
     rm -rf "$ROOT"
 
+    # --- A passphrase NetworkManager would unescape is escaped (separate sandbox) ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware"
+    echo "pi:x:1000:1000::/home/pi:/bin/sh" >"$ROOT/etc/passwd"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[wlan]
+ssid = "TestNet"
+password = " Pa\\ss\\d"
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    _ti_nm=$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)
+    assert_contains "psk backslashes and leading space are escaped" "$_ti_nm" 'psk=\sPa\\ss\\d'
+    rm -rf "$ROOT"
+
     # --- Non-UTF-8 SSID via ssid_hex: NM byte-array, WPA2 (separate sandbox) ---
     # "Foo" + a raw 0xfe octet -> 70;111;111;254; . Imager can't carry raw octets,
     # so this must always take the native NM writer.
