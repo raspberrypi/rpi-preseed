@@ -110,6 +110,13 @@ The timezone is set via
 is required if and only if
 .B mode
 is "token".
+An auth key (rpuak_ or rpoak_) is written to the user's
+.IR ~/.config/com.raspberrypi.connect/auth.key ,
+for the daemon to sign in with.
+An rpdev_ access token, as Raspberry Pi Imager's device-code sign-in
+returns, is already signed in and is written as the daemon's
+.I state.json
+in the same directory; it must be letters and digits after the prefix.
 .TP
 .B [interfaces]
 .BR i2c ", " spi ", " onewire " (bool), " serial " (enum), " usb_gadget " (bool)."

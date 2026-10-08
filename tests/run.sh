@@ -56,6 +56,7 @@ echo "== ownership =="   ; t_ownership
 echo "== home files ==" ; t_home_artefacts
 echo "== modes =="        ; t_modes
 echo "== written files ==" ; t_written_modes
+echo "== connect device token ==" ; t_connect_device_token
 echo "== integration ==" ; t_integration
 
 echo "-------------------------------------"
