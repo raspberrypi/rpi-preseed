@@ -314,10 +314,14 @@ EOF
     _ti_uw="$ROOT/home/alice/.config/systemd/user"
     assert_ok "rpi-connect.service wanted by default.target" \
         "[ -L $_ti_uw/default.target.wants/rpi-connect.service ]"
-    assert_ok "rpi-connect-wayvnc.service wanted by default.target" \
-        "[ -L $_ti_uw/default.target.wants/rpi-connect-wayvnc.service ]"
-    assert_ok "rpi-connect-signin.path wanted by paths.target" \
-        "[ -L $_ti_uw/paths.target.wants/rpi-connect-signin.path ]"
+    # As systemctl --user enable rpi-connect lays it out: wayvnc and the
+    # sign-in path are the service's Also=, wanted by the service itself.
+    assert_ok "rpi-connect-wayvnc.service wanted by rpi-connect.service" \
+        "[ -L $_ti_uw/rpi-connect.service.wants/rpi-connect-wayvnc.service ]"
+    assert_ok "rpi-connect-signin.path wanted by rpi-connect.service" \
+        "[ -L $_ti_uw/rpi-connect.service.wants/rpi-connect-signin.path ]"
+    assert_fail "nothing left in the old paths.target.wants" \
+        "[ -e $_ti_uw/paths.target.wants ]"
     assert_eq "the link names the on-device unit path, not the staging root" \
         "$(readlink "$_ti_uw/default.target.wants/rpi-connect.service")" \
         "/usr/lib/systemd/user/rpi-connect.service"

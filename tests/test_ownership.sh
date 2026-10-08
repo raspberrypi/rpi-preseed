@@ -89,7 +89,7 @@ home/alice/.ssh/authorized_keys|600
 home/alice/.config/com.raspberrypi.connect|700
 home/alice/.config/com.raspberrypi.connect/auth.key|600
 home/alice/.config/systemd/user/default.target.wants|700
-home/alice/.config/systemd/user/paths.target.wants|700
+home/alice/.config/systemd/user/rpi-connect.service.wants|700
 ROWS
 
     # Ownership for real, when the suite is privileged enough to have set it.

@@ -119,15 +119,19 @@ _ac_enable_user_units() {
     _aeu_user=$1
     _aeu_base="$2/.config/systemd/user"
 
+    # The layout `systemctl --user enable rpi-connect` makes, from the units'
+    # own [Install] sections: the service wanted by default.target, and the
+    # sign-in path and wayvnc -- its Also= -- wanted by the service. The path
+    # stays wanted once signed in; it only fires on an auth.key.
     ensure_dir "$_aeu_base/default.target.wants" 700 || return 0
-    ensure_dir "$_aeu_base/paths.target.wants" 700 || return 0
+    ensure_dir "$_aeu_base/rpi-connect.service.wants" 700 || return 0
 
     _aeu_linked=0
     _ac_link_unit "$_aeu_base/default.target.wants" rpi-connect.service &&
         _aeu_linked=$((_aeu_linked + 1))
-    _ac_link_unit "$_aeu_base/default.target.wants" rpi-connect-wayvnc.service &&
+    _ac_link_unit "$_aeu_base/rpi-connect.service.wants" rpi-connect-wayvnc.service &&
         _aeu_linked=$((_aeu_linked + 1))
-    _ac_link_unit "$_aeu_base/paths.target.wants" rpi-connect-signin.path &&
+    _ac_link_unit "$_aeu_base/rpi-connect.service.wants" rpi-connect-signin.path &&
         _aeu_linked=$((_aeu_linked + 1))
 
     if [ "$_aeu_linked" -eq 0 ]; then
@@ -141,9 +145,9 @@ _ac_enable_user_units() {
         "$2/.config" "$2/.config/systemd" "$_aeu_base" \
         "$_aeu_base/default.target.wants" \
         "$_aeu_base/default.target.wants/rpi-connect.service" \
-        "$_aeu_base/default.target.wants/rpi-connect-wayvnc.service" \
-        "$_aeu_base/paths.target.wants" \
-        "$_aeu_base/paths.target.wants/rpi-connect-signin.path"
+        "$_aeu_base/rpi-connect.service.wants" \
+        "$_aeu_base/rpi-connect.service.wants/rpi-connect-wayvnc.service" \
+        "$_aeu_base/rpi-connect.service.wants/rpi-connect-signin.path"
 
     _aeu_linger=$(target_path /var/lib/systemd/linger)
     ensure_dir "$_aeu_linger" 755 && : | atomic_write "$_aeu_linger/$_aeu_user"
