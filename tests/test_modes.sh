@@ -164,8 +164,12 @@ ROWS
 # in with. Written as auth.key it would be ignored and the board never seen.
 t_connect_device_token() {
     _tcd_root=$(mktemp -d)
-    mkdir -p "$_tcd_root/etc" "$_tcd_root/boot/firmware" "$_tcd_root/home/alice"
+    mkdir -p "$_tcd_root/etc" "$_tcd_root/boot/firmware" "$_tcd_root/home/alice" \
+        "$_tcd_root/usr/lib/systemd/user"
     echo "alice:x:1000:1000:,,,:/home/alice:/bin/bash" >"$_tcd_root/etc/passwd"
+    for _tcd_u in rpi-connect.service rpi-connect-wayvnc.service rpi-connect-signin.path; do
+        : >"$_tcd_root/usr/lib/systemd/user/$_tcd_u"
+    done
     cat >"$_tcd_root/boot/firmware/rpi-preseed.toml" <<'CFG'
 config_version = "1.0"
 [user]
@@ -189,6 +193,15 @@ CFG
     assert_fail "and no auth.key beside it" "[ -e '$_tcd_dir/auth.key' ]"
     assert_contains "the report says which file" \
         "$(cat "$_tcd_root/var/lib/rpi-preseed/report.json" 2>/dev/null)" "state.json"
+    # Signed in already, but nothing turns the daemon on by itself: the
+    # units are enabled, as for an auth key, and the account lingers.
+    _tcd_uw="$_tcd_root/home/alice/.config/systemd/user"
+    assert_ok "the daemon is enabled for a device token too" \
+        "[ -L $_tcd_uw/default.target.wants/rpi-connect.service ]"
+    assert_ok "with its sign-in path and wayvnc wanted by it" \
+        "[ -L $_tcd_uw/rpi-connect.service.wants/rpi-connect-signin.path ] && [ -L $_tcd_uw/rpi-connect.service.wants/rpi-connect-wayvnc.service ]"
+    assert_ok "and the account lingers, so it starts at boot" \
+        "[ -e $_tcd_root/var/lib/systemd/linger/alice ]"
     assert_ncontains "the token is redacted from the config afterwards" \
         "$(cat "$_tcd_root/boot/firmware/rpi-preseed.toml")" "rpdev_3mJr7AoUXx2Wqd1bVfzJ5tZpKq9"
 
