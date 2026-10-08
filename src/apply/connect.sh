@@ -3,6 +3,11 @@
 #
 # The daemon prefers a hardware device-identity and falls back to auth.key, so we
 # only ever need to (optionally) write the token; device-identity needs no flag.
+#
+# A token comes in one of two kinds. An auth key (rpuak_/rpoak_) is something
+# the daemon signs in with, read from auth.key. An rpdev_ access token, from
+# the device-code sign-in Raspberry Pi Imager uses where there is no browser,
+# is already signed in: it is the daemon's own state.json.
 
 apply_connect() {
     toml_present connect.enabled || return 0
@@ -24,18 +29,30 @@ apply_connect() {
         _ac_token=$(toml_get connect.token)
         _ac_dir="$_ac_home/.config/com.raspberrypi.connect"
         ensure_dir "$_ac_dir" 700
-        if printf '%s' "$_ac_token" | atomic_write "$_ac_dir/auth.key" 600; then
+        case "$_ac_token" in
+            rpdev_*)
+                # validate.sh has already held it to letters and digits, so it
+                # needs no escaping to sit in a JSON string.
+                _ac_file=state.json
+                _ac_body=$(printf '{"accessToken":"%s","vncDisabled":false,"shellDisabled":false}' "$_ac_token")
+                ;;
+            *)
+                _ac_file=auth.key
+                _ac_body=$_ac_token
+                ;;
+        esac
+        if printf '%s' "$_ac_body" | atomic_write "$_ac_dir/$_ac_file" 600; then
             # The daemon reads this as the user, so the user has to own it.
             # .config is included because ensure_dir will have created that too
             # on an account that has never logged in, and a root-owned .config
             # would take more than Connect down with it.
             own_user_path "$_ac_user" "$_ac_home/.config" "$_ac_dir" \
-                "$_ac_dir/auth.key"
-            report_key connect.token applied
+                "$_ac_dir/$_ac_file"
+            report_key connect.token applied "$_ac_file"
         else
             # Reported rather than swallowed: an unwritable token is the whole
             # of what token mode was asked to do.
-            report_key connect.token failed "could not write $_ac_dir/auth.key"
+            report_key connect.token failed "could not write $_ac_dir/$_ac_file"
         fi
     fi
 

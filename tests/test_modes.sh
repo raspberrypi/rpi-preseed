@@ -158,3 +158,39 @@ ROWS
 
     rm -rf "$_twm_root"
 }
+
+# t_connect_device_token — an rpdev_ access token, from Raspberry Pi Imager's
+# device-code sign-in, is the daemon's signed-in state, not an auth key to sign
+# in with. Written as auth.key it would be ignored and the board never seen.
+t_connect_device_token() {
+    _tcd_root=$(mktemp -d)
+    mkdir -p "$_tcd_root/etc" "$_tcd_root/boot/firmware" "$_tcd_root/home/alice"
+    echo "alice:x:1000:1000:,,,:/home/alice:/bin/bash" >"$_tcd_root/etc/passwd"
+    cat >"$_tcd_root/boot/firmware/rpi-preseed.toml" <<'CFG'
+config_version = "1.0"
+[user]
+name = "alice"
+[connect]
+enabled = true
+mode = "token"
+token = "rpdev_3mJr7AoUXx2Wqd1bVfzJ5tZpKq9"
+CFG
+
+    ( env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
+        RPI_PRESEED_ROOT="$_tcd_root" \
+        RPI_PRESEED_CONFIG="$_tcd_root/boot/firmware/rpi-preseed.toml" \
+        sh "$REPO/src/rpi-preseed" apply --phase base ) >/dev/null 2>&1
+
+    _tcd_dir="$_tcd_root/home/alice/.config/com.raspberrypi.connect"
+    assert_eq "device token written as state.json" \
+        "$(cat "$_tcd_dir/state.json" 2>/dev/null)" \
+        '{"accessToken":"rpdev_3mJr7AoUXx2Wqd1bVfzJ5tZpKq9","vncDisabled":false,"shellDisabled":false}'
+    assert_eq "state.json is the user's alone" "$(stat -c %a "$_tcd_dir/state.json" 2>/dev/null)" "600"
+    assert_fail "and no auth.key beside it" "[ -e '$_tcd_dir/auth.key' ]"
+    assert_contains "the report says which file" \
+        "$(cat "$_tcd_root/var/lib/rpi-preseed/report.json" 2>/dev/null)" "state.json"
+    assert_ncontains "the token is redacted from the config afterwards" \
+        "$(cat "$_tcd_root/boot/firmware/rpi-preseed.toml")" "rpdev_3mJr7AoUXx2Wqd1bVfzJ5tZpKq9"
+
+    rm -rf "$_tcd_root"
+}

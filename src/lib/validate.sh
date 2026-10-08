@@ -109,6 +109,17 @@ _validate_combos() {
         fi
     fi
 
+    # An rpdev_ access token is written into JSON as it stands, and a real one
+    # is Base58 after the prefix. Anything else could break out of the string.
+    if toml_present connect.token; then
+        case "$(toml_get connect.token)" in
+            rpdev_*[!A-Za-z0-9]*|rpdev_)
+                log_error "config: connect.token: an rpdev_ token must be letters and digits after the prefix"
+                _vco_ok=1
+                ;;
+        esac
+    fi
+
     # user.password requires user.name.
     if toml_present user.password && ! toml_present user.name; then
         log_error "config: user.password requires user.name"

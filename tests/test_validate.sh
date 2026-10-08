@@ -52,6 +52,25 @@ EOF
     assert_fail "token mode without token fails" 'validate_config'
     toml_cleanup
 
+    # An rpdev_ token goes into JSON as it stands, so it has to be what a real
+    # one is: letters and digits after the prefix. Auth keys are unaffected.
+    for _tv_tok in rpdev_3mJr7AoUXx2Wqd1bVfzJ5tZpKq9 rpuak_abc-def_123; do
+        _tv_fd=$(mktemp)
+        printf 'config_version = "1.0"\n[connect]\nmode = "token"\ntoken = "%s"\n' "$_tv_tok" >"$_tv_fd"
+        toml_parse "$_tv_fd"
+        assert_ok "connect token $_tv_tok is accepted" 'validate_config'
+        toml_cleanup
+        rm -f "$_tv_fd"
+    done
+    for _tv_tok in 'rpdev_abc\"def' 'rpdev_abc def' 'rpdev_'; do
+        _tv_fd=$(mktemp)
+        printf 'config_version = "1.0"\n[connect]\nmode = "token"\ntoken = "%s"\n' "$_tv_tok" >"$_tv_fd"
+        toml_parse "$_tv_fd"
+        assert_fail "rpdev_ token [$_tv_tok] is refused" 'validate_config'
+        toml_cleanup
+        rm -f "$_tv_fd"
+    done
+
     # Unknown key is tolerated (validation still succeeds).
     _tv_f5=$(mktemp)
     cat >"$_tv_f5" <<'EOF'
