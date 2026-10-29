@@ -1,3 +1,18 @@
+rpi-preseed (0.2.1) trixie; urgency=medium
+
+  [ Tom Dewey ]
+  * wlan: Escape the psk for NetworkManager's keyfile
+  * connect: Write an rpdev_ token as the daemon's state.json
+  * connect: Enable the units in the layout their [Install] gives
+
+  [ Richard Oliver ]
+  * Install the systemd units under /usr/lib/systemd/system
+  * Let the test suite run against an installed tree
+  * Add an autopkgtest running the suite against the installed package
+  * Add Uploaders and the Vcs fields
+
+ -- Richard Oliver <richard.oliver@raspberrypi.com>  Thu, 29 Oct 2026 15:13:38 +0000
+
 rpi-preseed (0.2.0) trixie; urgency=medium
 
   * Keep file modes across atomic writes and settle them without consulting
