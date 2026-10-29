@@ -7,7 +7,7 @@ SHAREDIR = $(PREFIX)/share/rpi-preseed
 BINDIR   = $(PREFIX)/bin
 MANDIR   = $(PREFIX)/share/man/man5
 DOCDIR   = $(PREFIX)/share/doc/rpi-preseed
-UNITDIR  = /lib/systemd/system
+UNITDIR  = $(PREFIX)/lib/systemd/system
 
 SCRIPTS = $(wildcard src/lib/*.sh) $(wildcard src/apply/*.sh) src/rpi-preseed
 QEMU_SCRIPTS = $(wildcard tests/qemu/lib/*.sh) tests/qemu/run.sh tests/qemu/probe/collect.sh \
