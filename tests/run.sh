@@ -2,8 +2,12 @@
 # rpi-preseed test harness (POSIX sh). Runs unit + integration tests.
 
 REPO=$(cd -- "$(dirname -- "$0")/.." && pwd)
-export RPI_PRESEED_SCHEMA="$REPO/schema/rpi-preseed.schema"
-export RPI_PRESEED_BASEDIR="$REPO/src"
+# Overridable, so the suite can be pointed at an installed tree as well as
+# the source tree.
+: "${RPI_PRESEED_SRCDIR:=$REPO/src}"
+: "${RPI_PRESEED_SCHEMA:=$REPO/schema/rpi-preseed.schema}"
+export RPI_PRESEED_SRCDIR RPI_PRESEED_SCHEMA
+export RPI_PRESEED_BASEDIR="$RPI_PRESEED_SRCDIR"
 
 SCRATCH=$(mktemp -d)
 export RPI_PRESEED_STATE_DIR="$SCRATCH/state"
@@ -12,15 +16,15 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 # Source libraries for unit tests.
 # shellcheck source=src/lib/common.sh
-. "$REPO/src/lib/common.sh"
+. "$RPI_PRESEED_SRCDIR/lib/common.sh"
 # shellcheck source=src/lib/toml.sh
-. "$REPO/src/lib/toml.sh"
+. "$RPI_PRESEED_SRCDIR/lib/toml.sh"
 # shellcheck source=src/lib/validate.sh
-. "$REPO/src/lib/validate.sh"
+. "$RPI_PRESEED_SRCDIR/lib/validate.sh"
 # shellcheck source=src/lib/redact.sh
-. "$REPO/src/lib/redact.sh"
+. "$RPI_PRESEED_SRCDIR/lib/redact.sh"
 # shellcheck source=src/lib/log.sh
-. "$REPO/src/lib/log.sh"
+. "$RPI_PRESEED_SRCDIR/lib/log.sh"
 
 TESTS=0
 FAILS=0
