@@ -26,7 +26,7 @@ EOF
     rpp() {
         env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
             RPI_PRESEED_ROOT="$ROOT" RPI_PRESEED_CONFIG="$CFG" \
-            sh "$REPO/src/rpi-preseed" "$@"
+            sh "$RPI_PRESEED_SRCDIR/rpi-preseed" "$@"
     }
 
     # --- Base apply (fallback path) ---

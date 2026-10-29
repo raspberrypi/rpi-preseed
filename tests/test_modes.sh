@@ -110,7 +110,7 @@ CFG
       env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
         RPI_PRESEED_ROOT="$_twm_root" \
         RPI_PRESEED_CONFIG="$_twm_root/boot/firmware/rpi-preseed.toml" \
-        sh "$REPO/src/rpi-preseed" apply --phase base ) >/dev/null 2>&1
+        sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base ) >/dev/null 2>&1
 
     while IFS='|' read -r _twm_p _twm_m; do
         if [ ! -e "$_twm_root/$_twm_p" ]; then
@@ -183,7 +183,7 @@ CFG
     ( env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
         RPI_PRESEED_ROOT="$_tcd_root" \
         RPI_PRESEED_CONFIG="$_tcd_root/boot/firmware/rpi-preseed.toml" \
-        sh "$REPO/src/rpi-preseed" apply --phase base ) >/dev/null 2>&1
+        sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base ) >/dev/null 2>&1
 
     _tcd_dir="$_tcd_root/home/alice/.config/com.raspberrypi.connect"
     assert_eq "device token written as state.json" \

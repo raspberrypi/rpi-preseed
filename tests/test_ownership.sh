@@ -68,7 +68,7 @@ CFG
     ( env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
         RPI_PRESEED_ROOT="$_tha_root" \
         RPI_PRESEED_CONFIG="$_tha_root/boot/firmware/rpi-preseed.toml" \
-        sh "$REPO/src/rpi-preseed" apply --phase base ) >/dev/null 2>&1
+        sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base ) >/dev/null 2>&1
 
     # Rows are path|mode, fed by redirection rather than a pipe: a piped `while`
     # runs in a subshell, where ok/no would bump counters the runner never sees
