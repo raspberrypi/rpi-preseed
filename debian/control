@@ -2,9 +2,13 @@ Source: rpi-preseed
 Section: admin
 Priority: optional
 Maintainer: Raspberry Pi OS Team <packages@raspberrypi.com>
+Uploaders: Tom Dewey <tom.dewey@raspberrypi.com>,
+           Richard Oliver <richard.oliver@raspberrypi.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.7.2
 Rules-Requires-Root: no
+Vcs-Browser: https://github.com/raspberrypi/rpi-preseed
+Vcs-Git: https://github.com/raspberrypi/rpi-preseed.git
 
 Package: rpi-preseed
 Architecture: all
