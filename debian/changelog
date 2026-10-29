@@ -1,4 +1,4 @@
-rpi-preseed (0.2.0) UNRELEASED; urgency=medium
+rpi-preseed (0.2.0) trixie; urgency=medium
 
   * Keep file modes across atomic writes and settle them without consulting
     the caller's umask, repairing modes an older version got wrong.
