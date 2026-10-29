@@ -1,0 +1,56 @@
+#!/bin/sh
+# Run the upstream suite against the installed tree, then check the few things
+# it cannot see. Read-only: nothing here calls "apply".
+set -u
+
+LIBDIR=/usr/lib/rpi-preseed
+UNITDIR=/usr/lib/systemd/system
+fail=0
+
+ok() { printf '   ok   - %s\n' "$1"; }
+no() { printf '   FAIL - %s\n' "$1"; fail=1; }
+
+echo "== upstream suite against ${LIBDIR}"
+if [ -x tests/run.sh ]; then
+   RPI_PRESEED_SRCDIR="$LIBDIR" \
+   RPI_PRESEED_SCHEMA=/usr/share/rpi-preseed/rpi-preseed.schema \
+      sh tests/run.sh || no "suite failed"
+else
+   no "tests/run.sh not beside the test; nothing was exercised"
+fi
+
+# The suite sources the libraries and runs the appliers, so it covers src/.
+# It never looks at the files the Makefile installs by name one at a time.
+echo "== files the Makefile installs by name"
+for f in /usr/share/rpi-preseed/rpi-preseed.schema \
+         /usr/share/man/man5/rpi-preseed.5.gz \
+         /usr/share/doc/rpi-preseed/examples/rpi-preseed.toml \
+         "${UNITDIR}/user@.service.d/10-rpi-preseed.conf"; do
+   if [ -e "$f" ]; then ok "$f"; else no "$f missing"; fi
+done
+
+echo "== units are valid"
+n=0
+for u in "${UNITDIR}"/rpi-preseed*.service "${UNITDIR}"/rpi-preseed*.target; do
+   [ -e "$u" ] || continue
+   n=$((n + 1))
+   if systemd-analyze verify "$u" > /dev/null 2>&1; then
+      ok "$(basename "$u")"
+   else
+      no "$(basename "$u")"
+      systemd-analyze verify "$u" 2>&1 | sed 's/^/        /'
+   fi
+done
+[ "$n" -ge 4 ] || no "only ${n} units found under ${UNITDIR}"
+
+# RPI_PRESEED_VERSION and debian/changelog are kept in step by hand.
+echo "== reported version matches the package"
+pkgver=$(dpkg-query -W -f='${Version}' rpi-preseed 2>/dev/null)
+reported=$(rpi-preseed version 2>/dev/null)
+if [ "$reported" = "$pkgver" ] || [ "$reported" = "${pkgver}-prototype" ]; then
+   ok "package ${pkgver}, reports '${reported}'"
+else
+   no "package ${pkgver}, reports '${reported}'"
+fi
+
+exit $fail

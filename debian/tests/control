@@ -1,0 +1,5 @@
+# Runs upstream's suite against the installed tree. debian/rules runs the same
+# suite at build time, but only ever against src/.
+Tests: installed
+Depends: @, systemd
+Restrictions: allow-stderr
