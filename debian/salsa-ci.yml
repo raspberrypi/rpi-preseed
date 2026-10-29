@@ -1,0 +1,17 @@
+include:
+  - remote: $CI_SERVER_URL/apt/salsa-ci/raw/pios/recipes/pios.yml
+
+# Every test job in the recipe is opt-in; it enables none of them itself.
+variables:
+  SALSA_CI_ENABLE_LINTIAN: 1
+  SALSA_CI_ENABLE_PIUPARTS: 1
+
+  # Not enabled: the job fetches its LXC image from salsa.debian.org. Point
+  # SALSA_CI_AUTOPKGTEST_LXC at an internal build of that artifact to enable.
+  # SALSA_CI_ENABLE_AUTOPKGTEST: 1
+
+  # Architecture: all. A second build job would emit a second .changes listing
+  # the same .deb, and .publish-public uploads every .changes it finds.
+  SALSA_CI_DISABLE_BUILD_PACKAGE_I386: 1
+  SALSA_CI_DISABLE_BUILD_PACKAGE_ARMHF: 1
+  SALSA_CI_DISABLE_BUILD_PACKAGE_AMD64: 1
