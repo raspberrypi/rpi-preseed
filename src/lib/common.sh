@@ -17,6 +17,7 @@
 : "${RPI_PRESEED_STATE_DIR:=${RPI_PRESEED_ROOT}/var/lib/rpi-preseed}"
 : "${RPI_PRESEED_BOOT_DIR:=${RPI_PRESEED_ROOT}/boot/firmware}"
 : "${RPI_PRESEED_LEGACY_BOOT_DIR:=${RPI_PRESEED_ROOT}/boot}"
+: "${RPI_PRESEED_PERSIST_DIR:=${RPI_PRESEED_ROOT}/persistent}"
 
 STATE_DIR="$RPI_PRESEED_STATE_DIR"
 LOG_DIR="$STATE_DIR/log"
@@ -29,7 +30,10 @@ STAMP_EARLY="$STATE_DIR/early-runcmd-done"
 STAMP_LATE="$STATE_DIR/runcmd-done"
 STAMP_FAILED="$STATE_DIR/apply-failed"
 
-# Default config location and its legacy fallback.
+# Config locations. An immutable image's boot partition is read-only and the
+# same on every device, so a per-device config goes on its persistent
+# partition instead, at the root because fastbootd cannot create directories.
+PERSIST_CONFIG="$RPI_PRESEED_PERSIST_DIR/rpi-preseed.toml"
 DEFAULT_CONFIG="$RPI_PRESEED_BOOT_DIR/rpi-preseed.toml"
 LEGACY_CONFIG="$RPI_PRESEED_LEGACY_BOOT_DIR/rpi-preseed.toml"
 

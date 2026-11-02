@@ -32,6 +32,8 @@ install:
 	install -m 0644 systemd/user@.service.d/10-rpi-preseed.conf $(DESTDIR)$(UNITDIR)/user@.service.d/
 	install -d $(DESTDIR)$(MANDIR)
 	install -m 0644 doc/rpi-preseed.5 $(DESTDIR)$(MANDIR)/
+	install -d $(DESTDIR)/etc/rpi-image-gen/slot-shared.d $(DESTDIR)/etc/userdb
+	install -m 0644 image-gen/rpi-preseed.conf $(DESTDIR)/etc/rpi-image-gen/slot-shared.d/
 	install -d $(DESTDIR)$(DOCDIR)/examples
 	install -m 0644 examples/rpi-preseed.toml $(DESTDIR)$(DOCDIR)/examples/
 

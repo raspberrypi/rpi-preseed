@@ -562,6 +562,25 @@ EOF
     assert_contains "re-apply keeps the new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
     rm -rf "$ROOT"
 
+    # --- A per-device config on the persistent partition wins over the boot one ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/persistent" "$ROOT/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    printf 'config_version = "1.0"\n[system]\nhostname = "fromboot"\n' >"$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$ROOT/persistent/rpi-preseed.toml" <<'EOF'
+config_version = "1.0"
+[system]
+hostname = "frompersistent"
+[wlan]
+ssid = "Net"
+password = "wifipassword1"
+EOF
+    env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$ROOT" \
+        sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
+    assert_eq "persistent config preferred" "$(cat "$ROOT/etc/hostname" 2>/dev/null)" "frompersistent"
+    assert_ncontains "persistent config redacted" "$(cat "$ROOT/persistent/rpi-preseed.toml")" "wifipassword1"
+    rm -rf "$ROOT"
+
     # --- Read-only targets, as on an immutable image (image-rota) ---
     # Real read-only bind mounts need a user namespace; skip where there is none.
     if unshare -rm true 2>/dev/null; then

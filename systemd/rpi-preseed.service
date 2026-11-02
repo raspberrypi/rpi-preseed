@@ -6,7 +6,9 @@ After=local-fs.target systemd-sysusers.service systemd-tmpfiles-setup.service
 # Structural barrier: finish before any login surface can start a UID 1000 session.
 Before=systemd-user-sessions.service network-pre.target userconfig.service
 Before=getty.target getty@tty1.service serial-getty@ttyS0.service display-manager.service
-ConditionPathExists=/boot/firmware/rpi-preseed.toml
+# Either location starts the unit (| makes the two an OR).
+ConditionPathExists=|/persistent/rpi-preseed.toml
+ConditionPathExists=|/boot/firmware/rpi-preseed.toml
 ConditionPathExists=!/var/lib/rpi-preseed/applied
 
 [Service]
