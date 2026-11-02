@@ -6,7 +6,9 @@ apply_locale() {
 
     if toml_present locale.timezone; then
         _al_tz=$(toml_get locale.timezone)
-        if imager_available; then
+        if ! writable_or_skip locale.timezone "$(target_path /etc/timezone)"; then
+            :
+        elif imager_available; then
             report_run locale.timezone imager_custom "$IMAGER_CUSTOM" set_timezone "$_al_tz"
         else
             printf '%s\n' "$_al_tz" | atomic_write "$(target_path /etc/timezone)" 644
@@ -42,6 +44,7 @@ _apply_keyboard() {
     _ak_model=$(toml_get_default locale.keymap_model pc105)
     _ak_variant=$(toml_get_default locale.keymap_variant "")
     _ak_options=$(toml_array locale.keymap_options | paste -sd, - 2>/dev/null)
+    writable_or_skip locale.keymap "$(target_path /etc/default/keyboard)" || return
 
     # imager_custom only handles a plain layout; fall through for variant/options.
     if imager_available && [ -z "$_ak_variant" ] && [ -z "$_ak_options" ]; then
@@ -113,6 +116,7 @@ _labwc_env_write() {
 # _apply_locales — enable locales in /etc/locale.gen and set /etc/default/locale.
 _apply_locales() {
     _algen=$(target_path /etc/locale.gen)
+    writable_or_skip locale.locales "$_algen" || return 0
     if [ -f "$_algen" ]; then
         toml_array locale.locales | while IFS= read -r _al_l; do
             [ -n "$_al_l" ] || continue

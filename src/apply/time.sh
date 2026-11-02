@@ -11,6 +11,7 @@ apply_time() {
     [ -n "$_at_ntp" ] || [ -n "$_at_fb" ] || return 0
 
     _at_dir=$(target_path /etc/systemd/timesyncd.conf.d)
+    writable_or_skip time.ntp "$_at_dir/10-rpi-preseed.conf" || return 0
     ensure_dir "$_at_dir" 755
     {
         printf '[Time]\n'

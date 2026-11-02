@@ -5,6 +5,7 @@ apply_system() {
     toml_present system.hostname || return 0
     _as_h=$(toml_get system.hostname)
     [ -n "$_as_h" ] || { report_key system.hostname skipped empty; return 0; }
+    writable_or_skip system.hostname "$(target_path /etc/hostname)" || return 0
 
     if imager_available; then
         report_run system.hostname imager_custom "$IMAGER_CUSTOM" set_hostname "$_as_h"

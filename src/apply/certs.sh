@@ -9,6 +9,7 @@
 apply_certs() {
     toml_present ca_certificates.files || return 0
     _ac_destdir=$(target_path /usr/local/share/ca-certificates)
+    writable_or_skip ca_certificates "$_ac_destdir/rpi-preseed.crt" || return 0
     ensure_dir "$_ac_destdir" 755
 
     _ac_staged=0

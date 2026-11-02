@@ -200,3 +200,10 @@ Redacted status breadcrumb and collect-logs bundles.
 .BR rpi-preseed (8)
 .SH NOTES
 Secrets are removed and PII is tokenised in all logs and diagnostics bundles.
+.PP
+On an immutable image, a setting whose destination is read-only is reported
+skipped, not applied; one written to a directory the image shares from
+writable storage still applies. A config on a read-only partition cannot have
+its secrets redacted, so prefer
+.B password_encrypted
+hashes.

@@ -18,6 +18,15 @@ apply_user() {
     toml_present user.name || toml_present user.password || \
         toml_present user.passwordless_sudo || toml_present user.groups || return 0
 
+    # An immutable image's UID 1000 account lives in its read-only /etc/passwd.
+    if ! writable_dir "$(target_path /etc)"; then
+        for _au_k in name password passwordless_sudo groups; do
+            toml_present "user.$_au_k" && report_key "user.$_au_k" skipped "read-only filesystem"
+        done
+        log_warn "user: /etc is read-only, so the UID 1000 account cannot change; add accounts with [[users]]"
+        return 0
+    fi
+
     _au_prev=$(first_user)
     [ -n "$_au_prev" ] || _au_prev=pi
 

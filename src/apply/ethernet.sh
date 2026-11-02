@@ -12,6 +12,7 @@ apply_ethernet() {
     _ae_iface=$(toml_get_default ethernet.interface "")
 
     _ae_dir=$(target_path /etc/NetworkManager/system-connections)
+    writable_or_skip ethernet.method "$_ae_dir/preconfigured-ethernet.nmconnection" || return 0
     ensure_dir "$_ae_dir" 755
     _ae_file="$_ae_dir/preconfigured-ethernet.nmconnection"
     {
