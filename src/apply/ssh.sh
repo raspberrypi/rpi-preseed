@@ -47,18 +47,24 @@ ssh_add_keys() {
 
 # _apply_ssh_fallback ENABLED — file-based sandbox fallback.
 _apply_ssh_fallback() {
-    if [ "$1" -eq 1 ]; then
-        : | atomic_write "$(target_path /boot/firmware/ssh)" 2>/dev/null || \
-            : | atomic_write "$(target_path /boot/ssh)" 2>/dev/null || true
-        report_key ssh.enabled applied "fallback"
+    _asf_flag=$(target_path /boot/firmware/ssh)
+    [ -d "$(dirname "$_asf_flag")" ] || _asf_flag=$(target_path /boot/ssh)
+    if [ "$1" -eq 1 ] && writable_or_skip ssh.enabled "$_asf_flag"; then
+        if : | atomic_write "$_asf_flag" 2>/dev/null; then
+            report_key ssh.enabled applied "fallback"
+        else
+            report_key ssh.enabled failed "could not write the ssh flag file"
+        fi
     fi
     _asf_sshd=$(target_path /etc/ssh/sshd_config.d/rpi-preseed.conf)
-    if toml_bool ssh.password_authentication false; then
-        printf 'PasswordAuthentication yes\n' | atomic_write "$_asf_sshd" 644
-    else
-        printf 'PasswordAuthentication no\n' | atomic_write "$_asf_sshd" 644
+    if writable_or_skip ssh.password_authentication "$_asf_sshd"; then
+        if toml_bool ssh.password_authentication false; then
+            printf 'PasswordAuthentication yes\n' | atomic_write "$_asf_sshd" 644
+        else
+            printf 'PasswordAuthentication no\n' | atomic_write "$_asf_sshd" 644
+        fi
+        report_key ssh.password_authentication applied "fallback"
     fi
-    report_key ssh.password_authentication applied "fallback"
 
     _asf_keys=$(toml_array ssh.authorized_keys)
     if [ -n "$_asf_keys" ]; then

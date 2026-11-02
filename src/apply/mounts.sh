@@ -8,6 +8,7 @@
 apply_mounts() {
     toml_present mounts.fstab || return 0
     _am_fstab=$(target_path /etc/fstab)
+    writable_or_skip mounts.fstab "$_am_fstab" || return 0
     ensure_dir "$(dirname "$_am_fstab")" 755
     [ -f "$_am_fstab" ] || : >"$_am_fstab"
 

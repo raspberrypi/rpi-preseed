@@ -561,4 +561,70 @@ EOF
     assert_eq "re-apply creates no duplicate" "$(grep -c '^bob:' "$ROOT/etc/passwd")" "1"
     assert_contains "re-apply keeps the new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
     rm -rf "$ROOT"
+
+    # --- Read-only targets, as on an immutable image (image-rota) ---
+    # Real read-only bind mounts need a user namespace; skip where there is none.
+    if unshare -rm true 2>/dev/null; then
+        ROOT=$(mktemp -d)
+        mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/var" "$ROOT/home/pi"
+        echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+        echo raspberrypi >"$ROOT/etc/hostname"
+        printf '127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
+        : >"$ROOT/boot/firmware/config.txt"
+        CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+        cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[system]
+hostname = "rota"
+[wlan]
+ssid = "Net"
+password = "wifipassword1"
+[boot]
+config_txt = ["dtparam=audio=on"]
+EOF
+        mkdir -p "$ROOT/etc/NetworkManager/system-connections"
+        # _ti_ro "RO..." "RW..." — base apply with each RO dir (under ROOT)
+        # read-only, then each RW dir writable again, as image-rota's shared
+        # bind mounts are.
+        _ti_ro() {
+            # shellcheck disable=SC2016  # expanded by the inner shell
+            unshare -rm sh -c '
+                r=$1
+                for d in $2; do
+                    mount --bind "$r$d" "$r$d" && mount -o remount,bind,ro "$r$d" || exit 99
+                done
+                for d in $3; do
+                    mount --bind "$r$d" "$r$d" && mount -o remount,bind,rw "$r$d" || exit 99
+                done
+                unset RPI_PRESEED_STATE_DIR RPI_PRESEED_BOOT_DIR
+                RPI_PRESEED_ROOT="$r" RPI_PRESEED_CONFIG="$r/boot/firmware/rpi-preseed.toml" \
+                    sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base
+            ' sh "$ROOT" "$1" "$2" >/dev/null 2>&1
+        }
+        _ti_rc=0
+        _ti_ro "/ /boot/firmware" "/var /home /etc/NetworkManager/system-connections" || _ti_rc=$?
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_eq "read-only root: apply completes" "$_ti_rc" "0"
+        assert_eq "read-only root: hostname untouched" "$(cat "$ROOT/etc/hostname")" "raspberrypi"
+        assert_contains "read-only root: hostname reported skipped" "$_ti_rep" \
+            '"key": "system.hostname", "status": "skipped", "detail": "read-only filesystem"'
+        assert_ncontains "read-only root: nothing read-only reported applied" "$_ti_rep" \
+            '"key": "system.hostname", "status": "applied"'
+        assert_contains "read-only root: Wi-Fi lands in the shared directory" \
+            "$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)" "ssid=Net"
+
+        rm -rf "$ROOT/var/lib"
+        _ti_rc=0
+        _ti_ro /boot/firmware /var || _ti_rc=$?
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_eq "read-only boot: apply succeeds" "$_ti_rc" "0"
+        assert_eq "read-only boot: hostname still applied" "$(cat "$ROOT/etc/hostname")" "rota"
+        assert_ncontains "read-only boot: config.txt untouched" "$(cat "$ROOT/boot/firmware/config.txt")" "audio"
+        assert_contains "read-only boot: config.txt reported skipped" "$_ti_rep" "read-only filesystem"
+        assert_contains "read-only boot: plain-text secrets warned" \
+            "$(cat "$ROOT/var/lib/rpi-preseed/log/base.log" 2>/dev/null)" "stay on it in plain text"
+        rm -rf "$ROOT"
+    else
+        echo "skip - read-only targets (no user namespaces)"
+    fi
 }

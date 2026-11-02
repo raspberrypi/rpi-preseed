@@ -142,7 +142,7 @@ _base_fail() {
 
 # redact_config_secrets FILE — blank secret values in the config, if writable.
 redact_config_secrets() {
-    [ -w "$1" ] || { log_warn "config source read-only; skipping secret redaction"; return 0; }
+    [ -w "$1" ] || { log_warn "config source is read-only, so its secrets stay on it in plain text"; return 0; }
     _rcs_tmp=$(mktemp) || return 1
     sed -E 's/^([[:space:]]*)(password|token)([[:space:]]*=[[:space:]]*).*/\1\2\3"'"$REDACTED_SECRET"'"/' "$1" >"$_rcs_tmp" \
         || { rm -f "$_rcs_tmp"; return 1; }
@@ -150,7 +150,7 @@ redact_config_secrets() {
         if burn_rewrite "$1" "$_rcs_tmp"; then
             log_info "redacted secrets in config source"
         else
-            log_warn "could not redact secrets in config source"
+            log_warn "could not redact the config source, so its secrets stay on it in plain text"
         fi
     fi
     rm -f "$_rcs_tmp"

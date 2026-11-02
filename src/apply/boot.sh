@@ -5,7 +5,7 @@ apply_boot() {
     _ab_cfg=$(target_path /boot/firmware/config.txt)
     [ -f "$_ab_cfg" ] || [ -d "$(dirname "$_ab_cfg")" ] || _ab_cfg=$(target_path /boot/config.txt)
 
-    if toml_present boot.config_txt; then
+    if toml_present boot.config_txt && writable_or_skip boot.config_txt "$_ab_cfg"; then
         ensure_dir "$(dirname "$_ab_cfg")" 755
         toml_array boot.config_txt | while IFS= read -r _ab_line; do
             [ -n "$_ab_line" ] || continue
@@ -20,6 +20,7 @@ apply_boot() {
         if [ -n "$_ab_add" ]; then
             _ab_cmd=$(target_path /boot/firmware/cmdline.txt)
             [ -f "$_ab_cmd" ] || _ab_cmd=$(target_path /boot/cmdline.txt)
+            writable_or_skip boot.cmdline_txt "$_ab_cmd" || return 0
             if [ -f "$_ab_cmd" ]; then
                 # cmdline.txt is a single line; append space-separated.
                 _ab_cur=$(cat "$_ab_cmd")

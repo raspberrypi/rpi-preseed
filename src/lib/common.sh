@@ -267,6 +267,24 @@ target_path() {
     printf '%s%s' "$RPI_PRESEED_ROOT" "$1"
 }
 
+# writable_dir DIR — can a file be created in DIR? Probed rather than tested
+# with -w, which busybox answers yes to on a read-only mount when run as root.
+writable_dir() {
+    _wd_probe=$(mktemp "$1/.rpi-preseed-probe.XXXXXX" 2>/dev/null) || return 1
+    rm -f "$_wd_probe"
+}
+
+# writable_or_skip KEY PATH — succeed if PATH can be written; otherwise report
+# KEY skipped. An immutable image mounts /boot/firmware read-only.
+writable_or_skip() {
+    _wos_d=$(dirname "$2")
+    while [ ! -d "$_wos_d" ]; do _wos_d=$(dirname "$_wos_d"); done
+    writable_dir "$_wos_d" && return 0
+    log_warn "$1: $_wos_d is read-only; not applied"
+    report_key "$1" skipped "read-only filesystem"
+    return 1
+}
+
 # keyfile_escape VALUE — VALUE as a GLib key-file string. NetworkManager
 # unescapes on load, so a raw "\s" becomes a space, "\d" voids the key and a
 # leading space is dropped.
