@@ -65,6 +65,7 @@ locate_config() {
             esac
         fi
     fi
+    [ -f "$PERSIST_CONFIG" ] && { printf '%s' "$PERSIST_CONFIG"; return 0; }
     [ -f "$DEFAULT_CONFIG" ] && { printf '%s' "$DEFAULT_CONFIG"; return 0; }
     [ -f "$LEGACY_CONFIG" ] && { printf '%s' "$LEGACY_CONFIG"; return 0; }
     return 1
@@ -77,6 +78,8 @@ do_base() {
     _db_force="$1"
     _db_cfg=$(locate_config) || { echo "rpi-preseed: no config found; nothing to do" >&2; return 0; }
     CONFIG_FINGERPRINT=$(config_fingerprint "$_db_cfg"); export CONFIG_FINGERPRINT
+    # shellcheck disable=SC2034  # read by apply/certs.sh
+    CONFIG_DIR=$(dirname "$_db_cfg")
 
     if [ "$_db_force" != 1 ]; then
         if [ -f "$STAMP_APPLIED" ]; then

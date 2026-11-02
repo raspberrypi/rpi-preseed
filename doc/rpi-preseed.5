@@ -191,8 +191,24 @@ Each step is retried with backoff using the
 tunables.
 .SH FILES
 .TP
+.B /persistent/rpi-preseed.toml
+A per-device config on an immutable image's persistent partition. Read in
+preference to the boot partition's, which such an image shares with every
+device.
+.TP
+.B /boot/firmware/rpi-preseed.toml
+The config, unless the kernel command line or the persistent partition gives
+one.
+.TP
 .B /var/lib/rpi-preseed/
 Stamps (applied, early-runcmd-done, runcmd-done, apply-failed), logs, and report.json.
+.TP
+.B /etc/rpi-image-gen/slot-shared.d/rpi-preseed.conf
+On an rpi-image-gen A/B image, keeps
+.I /var/lib/rpi-preseed
+and
+.I /etc/userdb
+on the persistent partition, shared by both slots.
 .TP
 .B /boot/firmware/rpi-preseed/
 Redacted status breadcrumb and collect-logs bundles.
