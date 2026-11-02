@@ -111,6 +111,7 @@ do_base() {
 
     apply_system
     apply_user
+    apply_users
     apply_ssh
     apply_wlan
     apply_ethernet

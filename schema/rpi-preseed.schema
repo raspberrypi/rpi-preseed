@@ -28,6 +28,14 @@ user.password_encrypted         bool                                            
 user.passwordless_sudo          bool                                            plain
 user.groups                     array                                           plain
 
+# [[users]]: additional accounts, created if missing. Keys are users.<n>.<key>.
+users.*.name                    string                                          pii
+users.*.password                string                                          secret
+users.*.password_encrypted      bool                                            plain
+users.*.passwordless_sudo       bool                                            plain
+users.*.groups                  array                                           plain
+users.*.authorized_keys         array                                           pii
+
 ssh.enabled                     bool                                            plain
 ssh.password_authentication     bool                                            plain
 ssh.ssh_import_id               array                                           pii

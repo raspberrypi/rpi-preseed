@@ -39,6 +39,24 @@ for an unprompted sudoers drop-in. Groups that do not exist on the image are
 warned and skipped rather than failing the apply. Groups and sudo are applied to
 the effective account even when no rename or password is configured.
 .TP
+.B [[users]]
+.BR name ", " password ", " password_encrypted " (bool), " passwordless_sudo " (bool), " groups " (array), " authorized_keys " (array)."
+Additional accounts, one
+.B [[users]]
+table each;
+.B name
+is required and must be a valid login name. A missing account is created with
+a home from
+.I /etc/skel
+and
+.IR /bin/bash ,
+locked until a password or key is given. The config takes precedence over an
+existing account: its password is reset to the configured one, with a warning.
+System accounts (UID below 1000) are refused.
+.B authorized_keys
+are installed for that account; sshd itself is enabled by
+.BR [ssh] .
+.TP
 .B [ssh]
 .BR enabled ", " password_authentication " (bool), " ssh_import_id " (array), " authorized_keys " (array)."
 .TP

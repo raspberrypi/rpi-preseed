@@ -1,7 +1,8 @@
 # shellcheck shell=dash
 # rpi-preseed — minimal, safe TOML parser (POSIX sh).
 #
-# Supports the subset rpi-preseed uses: [sections], scalar strings (basic "" and
+# Supports the subset rpi-preseed uses: [sections], [[arrays of tables]] (keyed
+# name.0.key, name.1.key, ...), scalar strings (basic "" and
 # literal ''), booleans, non-negative integers, and arrays of strings (single- or
 # multi-line). Values are never eval'd; parsed data is written to a private store
 # file and retrieved through accessor functions that emit safely-quoted values.
@@ -95,6 +96,7 @@ toml_parse() {
     : >"$TOML_STORE"
 
     _tp_section=""
+    _tp_tables=""       # "name index" per [[name]] seen, latest last
     _tp_collect=""      # non-empty while accumulating a multi-line array
     _tp_arrkey=""
     _tp_arrbuf=""
@@ -136,6 +138,18 @@ $_tp_raw"
         _tp_line=$(_trim "$_tp_raw")
         case "$_tp_line" in
             ''|'#'*) continue ;;
+        esac
+
+        # Array of tables: [[name]]. Each header opens the next entry, so its
+        # keys land under name.0, name.1, ... in the order they appear.
+        case "$_tp_line" in
+            '[['*']]')
+                _tp_table=$(printf '%s' "$_tp_line" | sed 's/^\[\[[[:space:]]*//; s/[[:space:]]*\]\]$//')
+                _tp_n=$(printf '%s\n' "$_tp_tables" | awk -v t="$_tp_table" '$1==t {n=$2+1} END{print n+0}')
+                _tp_tables="$_tp_tables
+$_tp_table $_tp_n"
+                _tp_section="$_tp_table.$_tp_n"
+                continue ;;
         esac
 
         # Section header: [name]
@@ -250,6 +264,14 @@ toml_present() {
 # toml_keys — print every distinct key present in the store.
 toml_keys() {
     awk -F"$US" '{print $2}' "$TOML_STORE" | sort -u
+}
+
+# toml_indices NAME — print the index of each [[NAME]] entry with keys, in order.
+toml_indices() {
+    awk -F"$US" -v t="$1." 'index($2, t)==1 {
+            r=substr($2, length(t)+1)
+            if (sub(/\..*/, "", r) && r ~ /^[0-9]+$/) print r
+        }' "$TOML_STORE" | sort -nu
 }
 
 # toml_cleanup — remove the store file.

@@ -19,8 +19,10 @@ schema_file() {
 }
 
 # schema_lookup KEY — print "type class flags" for KEY; return 1 if unknown.
+# An [[array of tables]] key (users.0.name) is listed by its pattern, users.*.name.
 schema_lookup() {
-    awk -v k="$1" '!/^#/ && NF>=3 && $1==k {print $2, $3, $4; f=1; exit} END{exit !f}' \
+    awk -v k="$1" 'BEGIN{sub(/\.[0-9]+\./, ".*.", k)}
+        !/^#/ && NF>=3 && $1==k {print $2, $3, $4; f=1; exit} END{exit !f}' \
         "$(schema_file)"
 }
 
@@ -126,6 +128,8 @@ _validate_combos() {
         _vco_ok=1
     fi
 
+    _validate_users || _vco_ok=1
+
     # hostname must be a valid RFC 1123 name; Wi-Fi settings must be consistent.
     if toml_present system.hostname; then
         _validate_hostname || _vco_ok=1
@@ -164,6 +168,31 @@ _validate_hostname() {
         return 1
     fi
     return 0
+}
+
+# _validate_users — each [[users]] entry needs a name useradd will accept (the
+# Debian default NAME_REGEX, at most 32 characters), and no name may repeat.
+_validate_users() {
+    _vu_ok=0; _vu_seen=""
+    for _vu_i in $(toml_indices users); do
+        if ! toml_present "users.$_vu_i.name"; then
+            log_error "config: [[users]] entry $_vu_i has no name"
+            _vu_ok=1; continue
+        fi
+        _vu_n=$(toml_get "users.$_vu_i.name")
+        if [ "${#_vu_n}" -gt 32 ] || \
+           ! printf '%s' "$_vu_n" | LC_ALL=C grep -Eq '^[a-z][-a-z0-9_]*$'; then
+            log_error "config: users.$_vu_i.name is not a valid login name (lower-case letters, digits, '-' and '_'; at most 32)"
+            _vu_ok=1; continue
+        fi
+        case " $_vu_seen " in
+            *" $_vu_n "*)
+                log_error "config: users.$_vu_i.name repeats an earlier [[users]] entry"
+                _vu_ok=1 ;;
+        esac
+        _vu_seen="$_vu_seen $_vu_n"
+    done
+    return "$_vu_ok"
 }
 
 # wlan_key_mgmt — effective Wi-Fi key management: explicit wlan.key_mgmt, else

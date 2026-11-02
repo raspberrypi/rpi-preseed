@@ -11,6 +11,14 @@ passwordless_sudo = false
 groups = ["sudo"]              # extra groups for the UID 1000 account (append-only);
                                # 'sudo' grants the account `sudo`. Missing groups are skipped.
 
+# Additional accounts, one [[users]] table each. Created if missing; an existing
+# account has its password reset to this one (with a warning).
+[[users]]
+name = "bob"
+password = "changeme"
+groups = ["gpio"]
+authorized_keys = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexampleexampleexampleexample bob@laptop"]
+
 [ssh]
 enabled = true
 password_authentication = false

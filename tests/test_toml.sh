@@ -147,4 +147,25 @@ EOF
         "$(toml_array runcmd.late)" 'python3 -c """escaped"""'
     toml_cleanup
     rm -f "$_tt_m"
+
+    # [[users]]: each header opens the next entry, numbered from 0.
+    _tt_a=$(mktemp)
+    cat >"$_tt_a" <<'EOF'
+config_version = "1.0"
+[[users]]
+name = "bob"
+groups = ["gpio"]
+[[ users ]]
+name = "carol"
+[user]
+name = "alice"
+EOF
+    toml_parse "$_tt_a"
+    assert_eq "first [[users]] entry" "$(toml_get users.0.name)" "bob"
+    assert_eq "second [[users]] entry" "$(toml_get users.1.name)" "carol"
+    assert_eq "array inside an entry" "$(toml_array users.0.groups)" "gpio"
+    assert_eq "plain table after [[users]]" "$(toml_get user.name)" "alice"
+    assert_eq "entry indices" "$(toml_indices users | tr '\n' ' ')" "0 1 "
+    toml_cleanup
+    rm -f "$_tt_a"
 }
