@@ -632,6 +632,56 @@ EOF
         assert_contains "read-only root: Wi-Fi lands in the shared directory" \
             "$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)" "ssid=Net"
 
+        # Accounts on a read-only /etc go to userdb records, which need
+        # nss-systemd; an account baked into the image is left alone.
+        rm -rf "$ROOT/var/lib"
+        cp "$CFG" "$CFG.orig"
+        mkdir -p "$ROOT/etc/userdb" "$ROOT/etc/skel"
+        echo skel >"$ROOT/etc/skel/.profile"
+        printf 'root:x:0:\nsudo:x:27:\npi:x:1000:\n' >"$ROOT/etc/group"
+        printf 'passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n' >"$ROOT/etc/nsswitch.conf"
+        cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[[users]]
+name = "bob"
+password = "$y$j9T$salt$BOBHASH"
+password_encrypted = true
+groups = ["sudo"]
+authorized_keys = ["ssh-ed25519 AAAA bob@host"]
+[[users]]
+name = "pi"
+password = "$y$j9T$salt$PIHASH"
+password_encrypted = true
+EOF
+        _ti_ro "/ /boot/firmware" "/var /home /etc/userdb"
+        _ti_ud="$ROOT/etc/userdb"
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_contains "userdb: account record" "$(cat "$_ti_ud/bob.user" 2>/dev/null)" '"userName":"bob","uid":59999,"gid":59999'
+        assert_eq "userdb: lookup by number" "$(readlink "$_ti_ud/59999.user")" "bob.user"
+        assert_contains "userdb: own group" "$(cat "$_ti_ud/bob.group" 2>/dev/null)" '"groupName":"bob","gid":59999'
+        assert_contains "userdb: password hash" "$(cat "$_ti_ud/bob.user-privileged" 2>/dev/null)" 'BOBHASH'
+        assert_eq "userdb: hash readable by root alone" "$(stat -c %a "$_ti_ud/bob.user-privileged" 2>/dev/null)" "600"
+        assert_eq "userdb: sudo membership not empty" "$(wc -c <"$_ti_ud/bob:sudo.membership" 2>/dev/null | tr -d ' ')" "1"
+        assert_file "userdb: home from skel" "$ROOT/home/bob/.profile"
+        assert_contains "userdb: key in the home" "$(cat "$ROOT/home/bob/.ssh/authorized_keys" 2>/dev/null)" "bob@host"
+        assert_fail "userdb: image account untouched" "[ -e '$_ti_ud/pi.user-privileged' ]"
+        assert_contains "userdb: image account reported skipped" "$_ti_rep" \
+            '"key": "users.1.name", "status": "skipped", "detail": "read-only filesystem"'
+        if command -v python3 >/dev/null 2>&1; then
+            assert_ok "userdb: records are JSON" \
+                "for f in '$_ti_ud'/*.user '$_ti_ud'/*.group '$_ti_ud'/*.user-privileged; do python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"\$f\" || exit 1; done"
+        fi
+        # Without nss-systemd the accounts could not log in, so it fails.
+        rm -rf "$ROOT/var/lib" "${_ti_ud:?}"/* "$ROOT/home/bob"
+        echo 'passwd: files' >"$ROOT/etc/nsswitch.conf"
+        sed -i 's/BOBHASH/BOBHASH2/' "$CFG"
+        _ti_ro "/ /boot/firmware" "/var /home /etc/userdb"
+        assert_contains "userdb: missing nss-systemd reported failed" \
+            "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+            '"key": "users.0.name", "status": "failed", "detail": "libnss-systemd missing"'
+        assert_fail "userdb: nothing written without nss-systemd" "[ -e '$_ti_ud/bob.user' ]"
+        mv "$CFG.orig" "$CFG"
+
         rm -rf "$ROOT/var/lib"
         _ti_rc=0
         _ti_ro /boot/firmware /var || _ti_rc=$?

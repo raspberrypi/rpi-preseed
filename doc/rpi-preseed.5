@@ -53,6 +53,21 @@ and
 locked until a password or key is given. The config takes precedence over an
 existing account: its password is reset to the configured one, with a warning.
 System accounts (UID below 1000) are refused.
+When
+.I /etc
+is read-only, as on an immutable image, accounts are written as systemd userdb
+records in
+.I /etc/userdb
+instead, with IDs counting down from 59999; this needs
+.BR libnss-systemd .
+An account in the image's own
+.I /etc/passwd
+cannot change there and is reported skipped, as is
+.B passwordless_sudo
+unless
+.I /etc/sudoers.d
+is writable. Such accounts cannot change their own password, and programs not
+running as root (a screen locker, for instance) cannot check it.
 .B authorized_keys
 are installed for that account; sshd itself is enabled by
 .BR [ssh] .
