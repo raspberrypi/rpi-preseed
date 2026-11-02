@@ -66,6 +66,7 @@ locate_config() {
         fi
     fi
     [ -f "$PERSIST_CONFIG" ] && { printf '%s' "$PERSIST_CONFIG"; return 0; }
+    [ -f "$BOOTFS_CONFIG" ] && { printf '%s' "$BOOTFS_CONFIG"; return 0; }
     [ -f "$DEFAULT_CONFIG" ] && { printf '%s' "$DEFAULT_CONFIG"; return 0; }
     [ -f "$LEGACY_CONFIG" ] && { printf '%s' "$LEGACY_CONFIG"; return 0; }
     return 1

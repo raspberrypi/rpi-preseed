@@ -18,12 +18,21 @@ apply_user() {
     toml_present user.name || toml_present user.password || \
         toml_present user.passwordless_sudo || toml_present user.groups || return 0
 
-    # An immutable image's UID 1000 account lives in its read-only /etc/passwd.
+    # An immutable image's UID 1000 account lives in its read-only /etc/passwd
+    # and cannot be renamed, so the named account is made in userdb instead.
+    # This is what lets an unchanged Imager configure such an image.
     if ! writable_dir "$(target_path /etc)"; then
+        if toml_present user.name && _select_users_backend user.name && \
+           [ "$USERS_BACKEND" = userdb ]; then
+            _apply_one_user user || return 1
+            # shellcheck disable=SC2034  # read by apply/ssh.sh
+            PRIMARY_USER=$(toml_get user.name)
+            return 0
+        fi
         for _au_k in name password passwordless_sudo groups; do
             toml_present "user.$_au_k" && report_key "user.$_au_k" skipped "read-only filesystem"
         done
-        log_warn "user: /etc is read-only, so the UID 1000 account cannot change; add accounts with [[users]]"
+        log_warn "user: /etc is read-only, so the UID 1000 account cannot change"
         return 0
     fi
 
@@ -93,27 +102,38 @@ apply_user() {
 apply_users() {
     _aus_idx=$(toml_indices users)
     [ -n "$_aus_idx" ] || return 0
-    # An immutable image's /etc/passwd is read-only; systemd's userdb takes
-    # accounts as drop-in records instead, from a directory it can share.
+    _aus_keys=""
+    for _aus_i in $_aus_idx; do _aus_keys="$_aus_keys users.$_aus_i.name"; done
+    # shellcheck disable=SC2086  # one argument per entry
+    _select_users_backend $_aus_keys || return 1
+    [ "$USERS_BACKEND" = none ] && return 0
+    _aus_rc=0
+    for _aus_i in $_aus_idx; do
+        _apply_one_user "users.$_aus_i" || _aus_rc=1
+    done
+    return "$_aus_rc"
+}
+
+# _select_users_backend KEY... — set USERS_BACKEND to passwd, userdb or none.
+# An immutable image's /etc/passwd is read-only; systemd's userdb takes
+# accounts as drop-in records instead, from a directory it can share. KEYs are
+# reported when no account can be made.
+_select_users_backend() {
     if writable_dir "$(target_path /etc)"; then
         USERS_BACKEND=passwd
     elif writable_dir "$(target_path /etc/userdb)"; then
         USERS_BACKEND=userdb
         if ! grep -Eq '^passwd:.*[[:space:]]systemd' "$(target_path /etc/nsswitch.conf)" 2>/dev/null; then
             log_error "users: /etc/passwd is read-only and NSS does not read userdb; install libnss-systemd"
-            for _aus_i in $_aus_idx; do report_key "users.$_aus_i.name" failed "libnss-systemd missing"; done
+            for _sub_k in "$@"; do report_key "$_sub_k" failed "libnss-systemd missing"; done
             return 1
         fi
     else
+        USERS_BACKEND=none
         log_warn "users: neither /etc nor /etc/userdb is writable; no accounts added"
-        for _aus_i in $_aus_idx; do report_key "users.$_aus_i.name" skipped "read-only filesystem"; done
-        return 0
+        for _sub_k in "$@"; do report_key "$_sub_k" skipped "read-only filesystem"; done
     fi
-    _aus_rc=0
-    for _aus_i in $_aus_idx; do
-        _apply_one_user "users.$_aus_i" || _aus_rc=1
-    done
-    return "$_aus_rc"
+    return 0
 }
 
 # _apply_one_user PREFIX — apply the [[users]] entry whose keys start PREFIX.

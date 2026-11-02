@@ -602,9 +602,10 @@ password = "wifipassword1"
 config_txt = ["dtparam=audio=on"]
 EOF
         mkdir -p "$ROOT/etc/NetworkManager/system-connections"
-        # _ti_ro "RO..." "RW..." — base apply with each RO dir (under ROOT)
-        # read-only, then each RW dir writable again, as image-rota's shared
-        # bind mounts are.
+        # _ti_ro "RO..." "RW..." [discover] — base apply with each RO dir
+        # (under ROOT) read-only, then each RW dir writable again, as
+        # image-rota's shared bind mounts are. "discover" leaves rpi-preseed
+        # to find the config itself.
         _ti_ro() {
             # shellcheck disable=SC2016  # expanded by the inner shell
             unshare -rm sh -c '
@@ -616,9 +617,9 @@ EOF
                     mount --bind "$r$d" "$r$d" && mount -o remount,bind,rw "$r$d" || exit 99
                 done
                 unset RPI_PRESEED_STATE_DIR RPI_PRESEED_BOOT_DIR
-                RPI_PRESEED_ROOT="$r" RPI_PRESEED_CONFIG="$r/boot/firmware/rpi-preseed.toml" \
-                    sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base
-            ' sh "$ROOT" "$1" "$2" >/dev/null 2>&1
+                [ "$4" = discover ] || export RPI_PRESEED_CONFIG="$r/boot/firmware/rpi-preseed.toml"
+                RPI_PRESEED_ROOT="$r" sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base
+            ' sh "$ROOT" "$1" "$2" "${3:-}" >/dev/null 2>&1
         }
         _ti_rc=0
         _ti_ro "/ /boot/firmware" "/var /home /etc/NetworkManager/system-connections" || _ti_rc=$?
@@ -680,6 +681,36 @@ EOF
             "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
             '"key": "users.0.name", "status": "failed", "detail": "libnss-systemd missing"'
         assert_fail "userdb: nothing written without nss-systemd" "[ -e '$_ti_ud/bob.user' ]"
+        mv "$CFG.orig" "$CFG"
+
+        # What Imager writes, unchanged, onto /bootfs (the first partition):
+        # [user] cannot rename the image's account, so it becomes a userdb
+        # account, and [ssh]'s keys go to it rather than to UID 1000.
+        rm -rf "$ROOT/var/lib" "${_ti_ud:?}"/* "$ROOT/home/bob"
+        printf 'passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n' >"$ROOT/etc/nsswitch.conf"
+        mkdir -p "$ROOT/bootfs"
+        mv "$CFG" "$CFG.orig"
+        cat >"$ROOT/bootfs/rpi-preseed.toml" <<'EOF'
+config_version = "1.0"
+[user]
+name = "alice"
+password = "$y$j9T$salt$ALICEHASH"
+password_encrypted = true
+groups = ["sudo"]
+[ssh]
+enabled = true
+authorized_keys = ["ssh-ed25519 AAAA alice@laptop"]
+EOF
+        _ti_ro "/ /boot/firmware" "/var /home /etc/userdb /bootfs" discover
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_contains "Imager [user]: made in userdb" "$(cat "$_ti_ud/alice.user" 2>/dev/null)" '"userName":"alice"'
+        assert_contains "Imager [user]: hash" "$(cat "$_ti_ud/alice.user-privileged" 2>/dev/null)" 'ALICEHASH'
+        assert_file "Imager [user]: sudo membership" "$_ti_ud/alice:sudo.membership"
+        assert_contains "Imager [user]: reported created" "$_ti_rep" '"key": "user.name", "status": "applied", "detail": "created"'
+        assert_contains "Imager [ssh]: keys go to that account" \
+            "$(cat "$ROOT/home/alice/.ssh/authorized_keys" 2>/dev/null)" "alice@laptop"
+        assert_fail "Imager [ssh]: not to the image's own account" "[ -e '$ROOT/home/pi/.ssh/authorized_keys' ]"
+        assert_ncontains "Imager config on /bootfs redacted" "$(cat "$ROOT/bootfs/rpi-preseed.toml")" "ALICEHASH"
         mv "$CFG.orig" "$CFG"
 
         rm -rf "$ROOT/var/lib"
