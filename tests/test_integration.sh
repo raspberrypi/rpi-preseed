@@ -512,4 +512,53 @@ EOF
     assert_contains "packages reported skipped without apt-get" \
         "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" "apt-get unavailable"
     rm -rf "$ROOT"
+
+    # --- [[users]]: create new accounts; an existing one has its password reset ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc/skel" "$ROOT/boot/firmware" "$ROOT/home/pi" "$ROOT/home/carol"
+    echo "skel" >"$ROOT/etc/skel/.profile"
+    cat >"$ROOT/etc/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+pi:x:1000:1000:,,,:/home/pi:/bin/bash
+carol:x:1001:1001:,,,:/home/carol:/bin/bash
+EOF
+    printf 'root:*:19000:0:99999:7:::\npi:*:19000:0:99999:7:::\ncarol:OLDHASH:19000:0:99999:7:::\n' >"$ROOT/etc/shadow"
+    printf 'root:x:0:\npi:x:1000:\ncarol:x:1001:\ngpio:x:997:\n' >"$ROOT/etc/group"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[[users]]
+name = "bob"
+password = "$5$salt$BOBHASH"
+password_encrypted = true
+groups = ["gpio"]
+authorized_keys = ["ssh-ed25519 AAAA bob@host"]
+passwordless_sudo = true
+[[users]]
+name = "carol"
+password = "$5$salt$CAROLHASH"
+password_encrypted = true
+[[users]]
+name = "root"
+password = "$5$salt$ROOTHASH"
+password_encrypted = true
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "new user in passwd" "$(cat "$ROOT/etc/passwd")" "bob:x:1002:1002::/home/bob:/bin/bash"
+    assert_contains "new user's own group" "$(cat "$ROOT/etc/group")" "bob:x:1002:"
+    assert_contains "new user added to gpio" "$(cat "$ROOT/etc/group")" "gpio:x:997:bob"
+    assert_contains "new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
+    assert_file "new user's home from skel" "$ROOT/home/bob/.profile"
+    assert_contains "new user's key" "$(cat "$ROOT/home/bob/.ssh/authorized_keys" 2>/dev/null)" "bob@host"
+    assert_file "new user's sudoers drop-in" "$ROOT/etc/sudoers.d/010_bob-nopasswd"
+    assert_contains "existing user's password reset" "$(cat "$ROOT/etc/shadow")" "carol:\$5\$salt\$CAROLHASH:"
+    assert_contains "reset is warned about" "$(cat "$ROOT/var/lib/rpi-preseed/log/base.log" 2>/dev/null)" "resetting its password"
+    assert_contains "system account left alone" "$(cat "$ROOT/etc/shadow")" "root:*:"
+    assert_contains "system account refusal reported" "$(cat "$ROOT/var/lib/rpi-preseed/report.json")" "system account"
+    assert_ncontains "[[users]] passwords redacted from the config" "$(cat "$CFG")" "BOBHASH"
+    # Re-apply: nobody is created twice and consumed passwords stay put.
+    rpp apply --phase base >/dev/null 2>&1
+    assert_eq "re-apply creates no duplicate" "$(grep -c '^bob:' "$ROOT/etc/passwd")" "1"
+    assert_contains "re-apply keeps the new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
+    rm -rf "$ROOT"
 }

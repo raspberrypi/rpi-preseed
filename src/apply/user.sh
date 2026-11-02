@@ -1,5 +1,6 @@
 # shellcheck shell=dash
-# rpi-preseed applier — [user]: rename the preconfigured user + set password.
+# rpi-preseed applier — [user]: rename the preconfigured user + set password;
+# [[users]]: create additional accounts.
 #
 # The rename is done via the RPi userconf helper, which internally runs
 # cancel-rename to wire up login/autologin correctly. A live-user guard (also
@@ -69,17 +70,134 @@ apply_user() {
     fi
 
     if toml_bool user.passwordless_sudo false; then
-        _au_sudo=$(target_path "/etc/sudoers.d/010_${_au_new}-nopasswd")
-        printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$_au_new" | atomic_write "$_au_sudo" 440
-        report_key user.passwordless_sudo applied
+        _apply_user_sudo "$_au_new" user
     fi
 
     if toml_present user.groups; then
-        _apply_user_groups "$_au_new"
+        _apply_user_groups "$_au_new" user
     fi
 }
 
-# _apply_user_groups USER — add USER to each supplementary group in user.groups.
+# apply_users — [[users]]: create each additional account, or bring an existing
+# one in line. The config wins: an existing account's password is reset to the
+# configured one, with a warning. System accounts (UID below 1000) are refused.
+apply_users() {
+    _aus_rc=0
+    for _aus_i in $(toml_indices users); do
+        _apply_one_user "users.$_aus_i" || _aus_rc=1
+    done
+    return "$_aus_rc"
+}
+
+# _apply_one_user PREFIX — apply the [[users]] entry whose keys start PREFIX.
+_apply_one_user() {
+    _aou_p=$1
+    _aou_name=$(toml_get "$_aou_p.name")
+
+    _aou_hash=""
+    if toml_present "$_aou_p.password"; then
+        _aou_pass=$(toml_get "$_aou_p.password")
+        if is_redacted "$_aou_pass"; then
+            report_key "$_aou_p.password" skipped "consumed by an earlier apply"
+        elif toml_bool "$_aou_p.password_encrypted" false; then
+            _aou_hash="$_aou_pass"
+        elif ! _aou_hash=$(hash_password "$_aou_pass"); then
+            report_key "$_aou_p.password" failed "no crypt tool"
+            return 1
+        fi
+    fi
+
+    _aou_ids=$(user_ids "$_aou_name")
+    if [ -z "$_aou_ids" ]; then
+        if ! _create_user "$_aou_name"; then
+            report_key "$_aou_p.name" failed "could not create"
+            return 1
+        fi
+        report_key "$_aou_p.name" applied "created"
+    elif [ "${_aou_ids%%:*}" -lt 1000 ]; then
+        log_error "users: refusing to manage system account '$_aou_name'"
+        report_key "$_aou_p.name" failed "system account"
+        return 1
+    else
+        report_key "$_aou_p.name" applied "exists"
+        [ -n "$_aou_hash" ] && \
+            log_warn "users: account '$_aou_name' already exists; resetting its password to the configured one"
+    fi
+
+    if [ -n "$_aou_hash" ]; then
+        if _set_user_hash "$_aou_name" "$_aou_hash"; then
+            report_key "$_aou_p.password" applied
+        else
+            report_key "$_aou_p.password" failed; return 1
+        fi
+    fi
+
+    if toml_bool "$_aou_p.passwordless_sudo" false; then
+        _apply_user_sudo "$_aou_name" "$_aou_p"
+    fi
+    if toml_present "$_aou_p.groups"; then
+        _apply_user_groups "$_aou_name" "$_aou_p" || return 1
+    fi
+    if toml_present "$_aou_p.authorized_keys"; then
+        toml_array "$_aou_p.authorized_keys" | ssh_add_keys "$_aou_name"
+        report_key "$_aou_p.authorized_keys" applied
+    fi
+    return 0
+}
+
+# _create_user NAME — add a login account with a home from /etc/skel. It starts
+# locked; a configured password or SSH key is what lets anyone in.
+_create_user() {
+    if helpers_live; then
+        useradd -m -s /bin/bash "$1"
+    else
+        _create_user_fallback "$1"
+    fi
+}
+
+# _create_user_fallback NAME — sandbox-only passwd/group/shadow edit. Takes the
+# next free UID from 1000 and, as useradd does, a group of the same name and ID.
+_create_user_fallback() {
+    _cuf_passwd=$(target_path /etc/passwd)
+    _cuf_group=$(target_path /etc/group)
+    _cuf_shadow=$(target_path /etc/shadow)
+    [ -f "$_cuf_passwd" ] || return 1
+    _cuf_id=$(cat "$_cuf_passwd" "$_cuf_group" 2>/dev/null | awk -F: '
+        $3>=1000 && $3<60000 && $3>=n {n=$3+1} END{print (n ? n : 1000)}')
+    printf '%s:x:%s:%s::/home/%s:/bin/bash\n' "$1" "$_cuf_id" "$_cuf_id" "$1" \
+        2>/dev/null >>"$_cuf_passwd" || return 1
+    printf '%s:x:%s:\n' "$1" "$_cuf_id" 2>/dev/null >>"$_cuf_group" || return 1
+    if [ -f "$_cuf_shadow" ]; then
+        printf '%s:!:%s:0:99999:7:::\n' "$1" "$(( $(date +%s) / 86400 ))" \
+            2>/dev/null >>"$_cuf_shadow" || return 1
+    fi
+    _cuf_home=$(target_path "/home/$1")
+    ensure_dir "$_cuf_home" 700 || return 1
+    [ -d "$(target_path /etc/skel)" ] && cp -a "$(target_path /etc/skel)/." "$_cuf_home/"
+    chown -R "$_cuf_id:$_cuf_id" "$_cuf_home" 2>/dev/null || true
+}
+
+# _set_user_hash NAME HASH — set NAME's crypt(3) hash. chpasswd -e keeps it off
+# the command line.
+_set_user_hash() {
+    if helpers_live; then
+        printf '%s:%s\n' "$1" "$2" | chpasswd -e
+    else
+        _suh_shadow=$(target_path /etc/shadow)
+        [ -f "$_suh_shadow" ] || return 1
+        awk -F: -v u="$1" -v h="$2" 'BEGIN{OFS=":"} $1==u {$2=h} {print}' \
+            "$_suh_shadow" >"$_suh_shadow.tmp" && mv -f "$_suh_shadow.tmp" "$_suh_shadow"
+    fi
+}
+
+# _apply_user_sudo USER PREFIX — a sudoers drop-in letting USER skip the password.
+_apply_user_sudo() {
+    _ausu_f=$(target_path "/etc/sudoers.d/010_${1}-nopasswd")
+    printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$1" | atomic_write "$_ausu_f" 440
+    report_key "$2.passwordless_sudo" applied
+}
+
+# _apply_user_groups USER PREFIX — add USER to each group in PREFIX.groups.
 #
 # This is what lets Imager (or a hand-written config) grant the operator real
 # privileges, most importantly membership of the 'sudo' group so the account can
@@ -88,9 +206,9 @@ apply_user() {
 # and skipped rather than failing the whole apply, so a typo or an
 # image-dependent group (e.g. gpio) never aborts first boot.
 _apply_user_groups() {
-    _aug_user="$1"
+    _aug_user="$1"; _aug_p="$2"
     _aug_added=""; _aug_missing=""; _aug_failed=""
-    for _aug_g in $(toml_array user.groups); do
+    for _aug_g in $(toml_array "$_aug_p.groups"); do
         [ -n "$_aug_g" ] || continue
         if ! _group_exists "$_aug_g"; then
             log_warn "user: group '$_aug_g' does not exist on this image; skipping"
@@ -104,10 +222,10 @@ _apply_user_groups() {
             _aug_failed="${_aug_failed:+$_aug_failed,}$_aug_g"
         fi
     done
-    [ -n "$_aug_added" ]   && report_key user.groups applied "$_aug_added"
-    [ -n "$_aug_missing" ] && report_key user.groups skipped "no such group: $_aug_missing"
+    [ -n "$_aug_added" ]   && report_key "$_aug_p.groups" applied "$_aug_added"
+    [ -n "$_aug_missing" ] && report_key "$_aug_p.groups" skipped "no such group: $_aug_missing"
     if [ -n "$_aug_failed" ]; then
-        report_key user.groups failed "$_aug_failed"
+        report_key "$_aug_p.groups" failed "$_aug_failed"
         return 1
     fi
     return 0

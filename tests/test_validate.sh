@@ -155,4 +155,25 @@ EOF
     toml_parse "$_tv_f7"; assert_ok "future minor proceeds" 'validate_version'; toml_cleanup
 
     rm -f "$_tv_f" "$_tv_f2" "$_tv_f3" "$_tv_f4" "$_tv_f5" "$_tv_f6" "$_tv_f7"
+
+    # [[users]]: a valid entry passes; missing, malformed or repeated names fail.
+    _tv_u=$(mktemp)
+    printf 'config_version = "1.0"\n[[users]]\nname = "bob"\npassword = "x"\n[[users]]\nname = "carol"\n' >"$_tv_u"
+    toml_parse "$_tv_u"
+    assert_ok "[[users]] entries validate" 'validate_config'
+    assert_eq "[[users]] password is a secret" "$(schema_class users.1.password)" "secret"
+    toml_cleanup
+    printf 'config_version = "1.0"\n[[users]]\ngroups = ["sudo"]\n' >"$_tv_u"
+    toml_parse "$_tv_u"
+    assert_fail "[[users]] entry without a name fails" 'validate_config'
+    toml_cleanup
+    printf 'config_version = "1.0"\n[[users]]\nname = "Bob Smith"\n' >"$_tv_u"
+    toml_parse "$_tv_u"
+    assert_fail "[[users]] invalid login name fails" 'validate_config'
+    toml_cleanup
+    printf 'config_version = "1.0"\n[[users]]\nname = "bob"\n[[users]]\nname = "bob"\n' >"$_tv_u"
+    toml_parse "$_tv_u"
+    assert_fail "[[users]] repeated name fails" 'validate_config'
+    toml_cleanup
+    rm -f "$_tv_u"
 }
