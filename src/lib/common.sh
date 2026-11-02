@@ -121,8 +121,7 @@ user_ids() {
     if [ -z "$RPI_PRESEED_ROOT" ]; then
         getent passwd "$1" 2>/dev/null | awk -F: '{print $3":"$4; exit}'
     else
-        awk -F: -v u="$1" '$1==u {print $3":"$4; exit}' \
-            "$(target_path /etc/passwd)" 2>/dev/null
+        _target_passwd_entry "$1" | awk -F: '{print $3":"$4; exit}'
     fi
 }
 
@@ -131,9 +130,20 @@ user_home() {
     if [ -z "$RPI_PRESEED_ROOT" ]; then
         getent passwd "$1" 2>/dev/null | cut -d: -f6
     else
-        awk -F: -v u="$1" '$1==u {print $6; exit}' \
-            "$(target_path /etc/passwd)" 2>/dev/null
+        _target_passwd_entry "$1" | cut -d: -f6
     fi
+}
+
+# _target_passwd_entry USER — USER's passwd line on a mounted target. A live
+# system's NSS already covers userdb; a mounted one reads the records
+# rpi-preseed writes, which keep uid, gid and homeDirectory in that order.
+_target_passwd_entry() {
+    awk -F: -v u="$1" '$1==u {print; f=1; exit} END{exit !f}' \
+        "$(target_path /etc/passwd)" 2>/dev/null && return 0
+    _tpe_rec="$(target_path /etc/userdb)/$1.user"
+    [ -f "$_tpe_rec" ] || return 1
+    sed -n 's/.*"uid":\([0-9]*\).*"gid":\([0-9]*\).*"homeDirectory":"\([^"]*\)".*/\1:\2:\3/p' \
+        "$_tpe_rec" | awk -F: -v u="$1" '{print u":x:"$1":"$2"::"$3":"; exit}'
 }
 
 # own_user_path USER PATH... — give PATHs to USER.

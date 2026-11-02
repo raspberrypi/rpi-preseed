@@ -91,8 +91,26 @@ apply_user() {
 # one in line. The config wins: an existing account's password is reset to the
 # configured one, with a warning. System accounts (UID below 1000) are refused.
 apply_users() {
+    _aus_idx=$(toml_indices users)
+    [ -n "$_aus_idx" ] || return 0
+    # An immutable image's /etc/passwd is read-only; systemd's userdb takes
+    # accounts as drop-in records instead, from a directory it can share.
+    if writable_dir "$(target_path /etc)"; then
+        USERS_BACKEND=passwd
+    elif writable_dir "$(target_path /etc/userdb)"; then
+        USERS_BACKEND=userdb
+        if ! grep -Eq '^passwd:.*[[:space:]]systemd' "$(target_path /etc/nsswitch.conf)" 2>/dev/null; then
+            log_error "users: /etc/passwd is read-only and NSS does not read userdb; install libnss-systemd"
+            for _aus_i in $_aus_idx; do report_key "users.$_aus_i.name" failed "libnss-systemd missing"; done
+            return 1
+        fi
+    else
+        log_warn "users: neither /etc nor /etc/userdb is writable; no accounts added"
+        for _aus_i in $_aus_idx; do report_key "users.$_aus_i.name" skipped "read-only filesystem"; done
+        return 0
+    fi
     _aus_rc=0
-    for _aus_i in $(toml_indices users); do
+    for _aus_i in $_aus_idx; do
         _apply_one_user "users.$_aus_i" || _aus_rc=1
     done
     return "$_aus_rc"
@@ -117,6 +135,12 @@ _apply_one_user() {
     fi
 
     _aou_ids=$(user_ids "$_aou_name")
+    if [ "$USERS_BACKEND" = userdb ] && [ -n "$_aou_ids" ] && \
+       [ ! -f "$(target_path "/etc/userdb/$_aou_name.user")" ]; then
+        log_warn "users: '$_aou_name' is in the image's read-only /etc/passwd; leaving it alone"
+        report_key "$_aou_p.name" skipped "read-only filesystem"
+        return 0
+    fi
     if [ -z "$_aou_ids" ]; then
         if ! _create_user "$_aou_name"; then
             report_key "$_aou_p.name" failed "could not create"
@@ -157,11 +181,39 @@ _apply_one_user() {
 # _create_user NAME — add a login account with a home from /etc/skel. It starts
 # locked; a configured password or SSH key is what lets anyone in.
 _create_user() {
-    if helpers_live; then
+    if [ "$USERS_BACKEND" = userdb ]; then
+        _create_userdb_user "$1"
+    elif helpers_live; then
         useradd -m -s /bin/bash "$1"
     else
         _create_user_fallback "$1"
     fi
+}
+
+# _create_userdb_user NAME — a userdb account and its own group, as drop-in
+# records nss-systemd reads directly. IDs count down from 59999, away from the
+# image's own accounts, which count up from 1000.
+_create_userdb_user() {
+    _cuu_dir=$(target_path /etc/userdb)
+    _cuu_id=$({
+        cut -d: -f3 "$(target_path /etc/passwd)" "$(target_path /etc/group)" 2>/dev/null
+        cat "$_cuu_dir"/*.user "$_cuu_dir"/*.group 2>/dev/null | grep -o '"[ug]id":[0-9]*' | cut -d: -f2
+    } | sort -n | awk 'BEGIN{n=59999} {u[$1]=1} END{while (u[n]) n--; print n}')
+    printf '{"userName":"%s","uid":%s,"gid":%s,"homeDirectory":"/home/%s","shell":"/bin/bash","disposition":"regular"}\n' \
+        "$1" "$_cuu_id" "$_cuu_id" "$1" | atomic_write "$_cuu_dir/$1.user" 644 || return 1
+    printf '{"groupName":"%s","gid":%s,"disposition":"regular"}\n' "$1" "$_cuu_id" \
+        | atomic_write "$_cuu_dir/$1.group" 644 || return 1
+    # Lookups by number go through these links.
+    ln -sfn "$1.user" "$_cuu_dir/$_cuu_id.user" && ln -sfn "$1.group" "$_cuu_dir/$_cuu_id.group" || return 1
+    _cuu_home=$(target_path "/home/$1")
+    ensure_dir "$_cuu_home" 700 || return 1
+    [ -d "$(target_path /etc/skel)" ] && cp -a "$(target_path /etc/skel)/." "$_cuu_home/"
+    chown -R "$_cuu_id:$_cuu_id" "$_cuu_home" 2>/dev/null || true
+}
+
+# _json_escape TEXT — TEXT as the inside of a JSON string.
+_json_escape() {
+    printf '%s\n' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 # _create_user_fallback NAME — sandbox-only passwd/group/shadow edit. Takes the
@@ -189,7 +241,10 @@ _create_user_fallback() {
 # _set_user_hash NAME HASH — set NAME's crypt(3) hash. chpasswd -e keeps it off
 # the command line.
 _set_user_hash() {
-    if helpers_live; then
+    if [ "$USERS_BACKEND" = userdb ]; then
+        _json_escape "$2" | awk '{printf "{\"privileged\":{\"hashedPassword\":[\"%s\"]}}\n", $0}' \
+            | atomic_write "$(target_path "/etc/userdb/$1.user-privileged")" 600
+    elif helpers_live; then
         printf '%s:%s\n' "$1" "$2" | chpasswd -e
     else
         _suh_shadow=$(target_path /etc/shadow)
@@ -202,6 +257,7 @@ _set_user_hash() {
 # _apply_user_sudo USER PREFIX — a sudoers drop-in letting USER skip the password.
 _apply_user_sudo() {
     _ausu_f=$(target_path "/etc/sudoers.d/010_${1}-nopasswd")
+    writable_or_skip "$2.passwordless_sudo" "$_ausu_f" || return 0
     printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$1" | atomic_write "$_ausu_f" 440
     report_key "$2.passwordless_sudo" applied
 }
@@ -253,7 +309,10 @@ _group_exists() {
 # _add_user_to_group USER GROUP — append USER to GROUP's members (idempotent).
 _add_user_to_group() {
     _autg_u="$1"; _autg_g="$2"
-    if helpers_live; then
+    if [ "${USERS_BACKEND:-}" = userdb ]; then
+        # Must not be empty: systemd reads an empty drop-in as a mask.
+        echo | atomic_write "$(target_path "/etc/userdb/$_autg_u:$_autg_g.membership")" 644
+    elif helpers_live; then
         # usermod -aG is append-only and a no-op if already a member.
         usermod -aG "$_autg_g" "$_autg_u"
     else
