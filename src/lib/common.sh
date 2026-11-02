@@ -18,6 +18,7 @@
 : "${RPI_PRESEED_BOOT_DIR:=${RPI_PRESEED_ROOT}/boot/firmware}"
 : "${RPI_PRESEED_LEGACY_BOOT_DIR:=${RPI_PRESEED_ROOT}/boot}"
 : "${RPI_PRESEED_PERSIST_DIR:=${RPI_PRESEED_ROOT}/persistent}"
+: "${RPI_PRESEED_BOOTFS_DIR:=${RPI_PRESEED_ROOT}/bootfs}"
 
 STATE_DIR="$RPI_PRESEED_STATE_DIR"
 LOG_DIR="$STATE_DIR/log"
@@ -32,8 +33,10 @@ STAMP_FAILED="$STATE_DIR/apply-failed"
 
 # Config locations. An immutable image's boot partition is read-only and the
 # same on every device, so a per-device config goes on its persistent
-# partition instead, at the root because fastbootd cannot create directories.
+# partition, at the root because fastbootd cannot create directories, or on
+# its writable /bootfs, the first partition, where Imager writes.
 PERSIST_CONFIG="$RPI_PRESEED_PERSIST_DIR/rpi-preseed.toml"
+BOOTFS_CONFIG="$RPI_PRESEED_BOOTFS_DIR/rpi-preseed.toml"
 DEFAULT_CONFIG="$RPI_PRESEED_BOOT_DIR/rpi-preseed.toml"
 LEGACY_CONFIG="$RPI_PRESEED_LEGACY_BOOT_DIR/rpi-preseed.toml"
 

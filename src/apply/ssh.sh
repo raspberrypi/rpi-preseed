@@ -68,7 +68,9 @@ _apply_ssh_fallback() {
 
     _asf_keys=$(toml_array ssh.authorized_keys)
     if [ -n "$_asf_keys" ]; then
-        _asf_user=$(first_user)
+        # [user] made in userdb on an immutable image owns these keys, not the
+        # image's own UID 1000 account.
+        _asf_user=${PRIMARY_USER:-$(first_user)}
         [ -n "$_asf_user" ] || _asf_user=$(toml_get_default user.name pi)
         printf '%s\n' "$_asf_keys" | ssh_add_keys "$_asf_user"
         report_key ssh.authorized_keys applied "fallback"
