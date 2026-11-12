@@ -308,6 +308,21 @@ persists() {
         END { exit !f }' "$_ps_m"
 }
 
+: "${SLOT_STATE_SAVE:=/usr/libexec/rpi-persist-files}"
+
+# save_persisted — copy the manifest's /etc files to persistent storage now.
+# The image does so itself, but only some time after a file changes.
+save_persisted() {
+    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ] || return 0
+    # Without the overlay /etc holds the image's defaults, not to be saved.
+    [ -n "$RPI_PRESEED_ROOT" ] || mountpoint -q /etc || return 0
+    if [ ! -x "$SLOT_STATE_SAVE" ]; then
+        log_warn "no $SLOT_STATE_SAVE; a power cut now could lose what was applied"
+        return 0
+    fi
+    "$SLOT_STATE_SAVE"
+}
+
 # writable_or_skip KEY PATH — succeed if PATH can be written and will persist;
 # otherwise report KEY skipped. An immutable image mounts /boot/firmware
 # read-only.

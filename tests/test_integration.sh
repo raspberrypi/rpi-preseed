@@ -781,6 +781,27 @@ TOML
     assert_contains "slot-state: unkept sudoers skipped" "$_ss_rep" \
         '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not persisted"'
 
+    # The save runs before the config is consumed; if it fails, nothing is.
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd" "$ROOT/etc/shadow" "$ROOT/etc/group" "$ROOT/etc/gshadow"
+    mv "$ROOT/home/alice" "$ROOT/home/pi"
+    _ss_save="$ROOT/save"
+    # shellcheck disable=SC2016  # expanded by the stub
+    printf '#!/bin/sh\n[ -e "%s/var/lib/rpi-preseed/applied" ] && echo late >>"%s/saved"\ngrep -c ALICEHASH "%s/boot/firmware/rpi-preseed.toml" >>"%s/saved"\n' \
+        "$ROOT" "$ROOT" "$ROOT" "$ROOT" >"$_ss_save"
+    chmod +x "$_ss_save"
+    SLOT_STATE_SAVE="$_ss_save" rpp
+    assert_eq "slot-state: saved before stamp and redaction" "$(cat "$ROOT/saved" 2>/dev/null)" "1"
+    assert_file "slot-state: stamped after the save" "$ROOT/var/lib/rpi-preseed/applied"
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd" "$ROOT/etc/shadow" "$ROOT/etc/group" "$ROOT/etc/gshadow"
+    mv "$ROOT/home/alice" "$ROOT/home/pi"
+    printf '#!/bin/sh\nexit 1\n' >"$_ss_save"
+    _ss_rc=0; SLOT_STATE_SAVE="$_ss_save" rpp || _ss_rc=$?
+    assert_eq "slot-state: failed save fails the apply" "$_ss_rc" "1"
+    assert_fail "slot-state: failed save leaves no applied stamp" "[ -e '$ROOT/var/lib/rpi-preseed/applied' ]"
+    assert_contains "slot-state: failed save keeps the secrets" "$(cat "$CFG")" "ALICEHASH"
+
     # With the sudoers file declared, it lands.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
     _ss_decl sudoers.d/010_rpi-preseed-nopasswd
