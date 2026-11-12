@@ -2,13 +2,14 @@
 # rpi-preseed applier — [ca_certificates]: install extra trusted CA certificates.
 #
 # Certificates are referenced by file (a PEM cannot be embedded inline because the
-# TOML parser carries no newlines). Each file is resolved next to the config on
-# the boot partition (or as an absolute path), staged into
+# TOML parser carries no newlines). Each file is resolved next to the config
+# (or as an absolute path), staged into
 # /usr/local/share/ca-certificates, and registered with update-ca-certificates.
 
 apply_certs() {
     toml_present ca_certificates.files || return 0
     _ac_destdir=$(target_path /usr/local/share/ca-certificates)
+    writable_or_skip ca_certificates "$_ac_destdir/rpi-preseed.crt" || return 0
     ensure_dir "$_ac_destdir" 755
 
     _ac_staged=0
@@ -17,7 +18,7 @@ apply_certs() {
         [ -n "$_ac_f" ] || continue
         case "$_ac_f" in
             /*) _ac_src="$_ac_f" ;;
-            *)  _ac_src="$RPI_PRESEED_BOOT_DIR/$_ac_f" ;;
+            *)  _ac_src="${CONFIG_DIR:-$RPI_PRESEED_BOOT_DIR}/$_ac_f" ;;
         esac
         if [ ! -f "$_ac_src" ]; then
             log_warn "ca_certificates: file not found, skipping: $_ac_f"

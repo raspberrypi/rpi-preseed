@@ -53,6 +53,7 @@ _apply_wlan_country() {
     fi
     _awc_cmd=$(target_path /boot/firmware/cmdline.txt)
     [ -f "$_awc_cmd" ] || _awc_cmd=$(target_path /boot/cmdline.txt)
+    writable_or_skip wlan.country "$_awc_cmd" || return 0
     _awc_param="cfg80211.ieee80211_regdom=$_awc_country"
     if [ -f "$_awc_cmd" ]; then
         if ! grep -qwF "$_awc_param" "$_awc_cmd" 2>/dev/null; then
@@ -78,6 +79,7 @@ _apply_wlan_nm() {
     _awf_hidden=false
     toml_bool wlan.hidden false && _awf_hidden=true
     _awf_dir=$(target_path /etc/NetworkManager/system-connections)
+    writable_or_skip wlan.ssid "$_awf_dir/preconfigured.nmconnection" || return 0
     ensure_dir "$_awf_dir" 755
     _awf_file="$_awf_dir/preconfigured.nmconnection"
     {

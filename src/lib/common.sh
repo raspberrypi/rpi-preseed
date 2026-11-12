@@ -17,6 +17,8 @@
 : "${RPI_PRESEED_STATE_DIR:=${RPI_PRESEED_ROOT}/var/lib/rpi-preseed}"
 : "${RPI_PRESEED_BOOT_DIR:=${RPI_PRESEED_ROOT}/boot/firmware}"
 : "${RPI_PRESEED_LEGACY_BOOT_DIR:=${RPI_PRESEED_ROOT}/boot}"
+: "${RPI_PRESEED_PERSIST_DIR:=${RPI_PRESEED_ROOT}/persistent}"
+: "${RPI_PRESEED_BOOTFS_DIR:=${RPI_PRESEED_ROOT}/bootfs}"
 
 STATE_DIR="$RPI_PRESEED_STATE_DIR"
 LOG_DIR="$STATE_DIR/log"
@@ -29,7 +31,12 @@ STAMP_EARLY="$STATE_DIR/early-runcmd-done"
 STAMP_LATE="$STATE_DIR/runcmd-done"
 STAMP_FAILED="$STATE_DIR/apply-failed"
 
-# Default config location and its legacy fallback.
+# Config locations. An immutable image's boot partition is read-only and the
+# same on every device, so a per-device config goes on its persistent
+# partition, at the root because fastbootd cannot create directories, or on
+# its writable /bootfs, the first partition, where Imager writes.
+PERSIST_CONFIG="$RPI_PRESEED_PERSIST_DIR/rpi-preseed.toml"
+BOOTFS_CONFIG="$RPI_PRESEED_BOOTFS_DIR/rpi-preseed.toml"
 DEFAULT_CONFIG="$RPI_PRESEED_BOOT_DIR/rpi-preseed.toml"
 LEGACY_CONFIG="$RPI_PRESEED_LEGACY_BOOT_DIR/rpi-preseed.toml"
 
@@ -117,8 +124,7 @@ user_ids() {
     if [ -z "$RPI_PRESEED_ROOT" ]; then
         getent passwd "$1" 2>/dev/null | awk -F: '{print $3":"$4; exit}'
     else
-        awk -F: -v u="$1" '$1==u {print $3":"$4; exit}' \
-            "$(target_path /etc/passwd)" 2>/dev/null
+        _target_passwd_entry "$1" | awk -F: '{print $3":"$4; exit}'
     fi
 }
 
@@ -127,9 +133,20 @@ user_home() {
     if [ -z "$RPI_PRESEED_ROOT" ]; then
         getent passwd "$1" 2>/dev/null | cut -d: -f6
     else
-        awk -F: -v u="$1" '$1==u {print $6; exit}' \
-            "$(target_path /etc/passwd)" 2>/dev/null
+        _target_passwd_entry "$1" | cut -d: -f6
     fi
+}
+
+# _target_passwd_entry USER — USER's passwd line on a mounted target. A live
+# system's NSS already covers userdb; a mounted one reads the records
+# rpi-preseed writes, which keep uid, gid and homeDirectory in that order.
+_target_passwd_entry() {
+    awk -F: -v u="$1" '$1==u {print; f=1; exit} END{exit !f}' \
+        "$(target_path /etc/passwd)" 2>/dev/null && return 0
+    _tpe_rec="$(target_path /etc/userdb)/$1.user"
+    [ -f "$_tpe_rec" ] || return 1
+    sed -n 's/.*"uid":\([0-9]*\).*"gid":\([0-9]*\).*"homeDirectory":"\([^"]*\)".*/\1:\2:\3/p' \
+        "$_tpe_rec" | awk -F: -v u="$1" '{print u":x:"$1":"$2"::"$3":"; exit}'
 }
 
 # own_user_path USER PATH... — give PATHs to USER.
@@ -265,6 +282,62 @@ hash_password() {
 # Appliers write through this so tests can target a sandbox rootfs.
 target_path() {
     printf '%s%s' "$RPI_PRESEED_ROOT" "$1"
+}
+
+# writable_dir DIR — can a file be created in DIR? Probed rather than tested
+# with -w, which busybox answers yes to on a read-only mount when run as root.
+writable_dir() {
+    _wd_probe=$(mktemp "$1/.rpi-preseed-probe.XXXXXX" 2>/dev/null) || return 1
+    rm -f "$_wd_probe"
+}
+
+: "${SLOT_STATE_MANIFEST:=/usr/lib/rpi-image-gen/slot-state.manifest}"
+
+# persists PATH — would a write to target path PATH survive a reboot? An
+# rpi-image-gen A/B image's /etc is writable but on tmpfs: only what its
+# slot-state manifest declares is saved.
+persists() {
+    _ps_m=$(target_path "$SLOT_STATE_MANIFEST")
+    [ -f "$_ps_m" ] || return 0
+    _ps_p=${1#"$RPI_PRESEED_ROOT"}
+    case "$_ps_p" in /etc/*) ;; *) return 0 ;; esac
+    awk -v p="$_ps_p" '
+        $1 == "EarlyPersistFile" && $2 == p { f = 1 }
+        ($1 == "SharedPath" || $1 == "StaticPath") &&
+            (p == $2 || index(p, $2 "/") == 1) { f = 1 }
+        END { exit !f }' "$_ps_m"
+}
+
+: "${SLOT_STATE_SAVE:=/usr/libexec/rpi-persist-files}"
+
+# save_persisted — copy the manifest's /etc files to persistent storage now.
+# The image does so itself, but only some time after a file changes.
+save_persisted() {
+    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ] || return 0
+    # Without the overlay /etc holds the image's defaults, not to be saved.
+    [ -n "$RPI_PRESEED_ROOT" ] || mountpoint -q /etc || return 0
+    if [ ! -x "$SLOT_STATE_SAVE" ]; then
+        log_warn "no $SLOT_STATE_SAVE; a power cut now could lose what was applied"
+        return 0
+    fi
+    "$SLOT_STATE_SAVE"
+}
+
+# writable_or_skip KEY PATH — succeed if PATH can be written and will persist;
+# otherwise report KEY skipped. An immutable image mounts /boot/firmware
+# read-only.
+writable_or_skip() {
+    _wos_d=$(dirname "$2")
+    while [ ! -d "$_wos_d" ]; do _wos_d=$(dirname "$_wos_d"); done
+    if ! writable_dir "$_wos_d"; then
+        log_warn "$1: $_wos_d is read-only; not applied"
+        report_key "$1" skipped "read-only filesystem"
+        return 1
+    fi
+    persists "$2" && return 0
+    log_warn "$1: ${2#"$RPI_PRESEED_ROOT"} would be lost at reboot; the slot-state manifest does not keep it"
+    report_key "$1" skipped "not persisted"
+    return 1
 }
 
 # keyfile_escape VALUE — VALUE as a GLib key-file string. NetworkManager

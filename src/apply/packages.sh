@@ -19,6 +19,8 @@ apply_packages() {
         report_key packages skipped "apt-get unavailable"
         return 0
     fi
+    # An immutable image cannot take packages, and is not meant to.
+    writable_or_skip packages "$(target_path /usr/bin)/apt-get" || return 0
 
     _ap_retries=$(toml_get_default runcmd.late_retries 3)
     _ap_delay=$(toml_get_default runcmd.late_retry_delay 5)

@@ -23,42 +23,56 @@ apply_ssh() {
     fi
 }
 
+# ssh_add_keys USER — append the keys on stdin to USER's authorized_keys.
+ssh_add_keys() {
+    _sak_user=$1
+    _sak_home=$(user_home "$_sak_user")
+    [ -n "$_sak_home" ] || _sak_home="/home/$_sak_user"
+    _sak_home=$(target_path "$_sak_home")
+    _sak_ak="$_sak_home/.ssh/authorized_keys"
+    ensure_dir "$_sak_home/.ssh" 700
+    # Appended key by key, skipping any already present: every other applier
+    # is idempotent under re-apply, and this one used to grow a duplicate
+    # set of keys each time it ran.
+    while IFS= read -r _sak_k; do
+        [ -n "$_sak_k" ] || continue
+        grep -qxF -- "$_sak_k" "$_sak_ak" 2>/dev/null && continue
+        printf '%s\n' "$_sak_k" >>"$_sak_ak"
+    done
+    chmod 600 "$_sak_ak" 2>/dev/null || true
+    # sshd tolerates a root-owned authorized_keys, so this is not what keeps
+    # a key out; it is so the account can manage its own keys afterwards.
+    own_user_path "$_sak_user" "$_sak_home/.ssh" "$_sak_ak"
+}
+
 # _apply_ssh_fallback ENABLED — file-based sandbox fallback.
 _apply_ssh_fallback() {
-    if [ "$1" -eq 1 ]; then
-        : | atomic_write "$(target_path /boot/firmware/ssh)" 2>/dev/null || \
-            : | atomic_write "$(target_path /boot/ssh)" 2>/dev/null || true
-        report_key ssh.enabled applied "fallback"
+    _asf_flag=$(target_path /boot/firmware/ssh)
+    [ -d "$(dirname "$_asf_flag")" ] || _asf_flag=$(target_path /boot/ssh)
+    if [ "$1" -eq 1 ] && writable_or_skip ssh.enabled "$_asf_flag"; then
+        if : | atomic_write "$_asf_flag" 2>/dev/null; then
+            report_key ssh.enabled applied "fallback"
+        else
+            report_key ssh.enabled failed "could not write the ssh flag file"
+        fi
     fi
     _asf_sshd=$(target_path /etc/ssh/sshd_config.d/rpi-preseed.conf)
-    if toml_bool ssh.password_authentication false; then
-        printf 'PasswordAuthentication yes\n' | atomic_write "$_asf_sshd" 644
-    else
-        printf 'PasswordAuthentication no\n' | atomic_write "$_asf_sshd" 644
+    if writable_or_skip ssh.password_authentication "$_asf_sshd"; then
+        if toml_bool ssh.password_authentication false; then
+            printf 'PasswordAuthentication yes\n' | atomic_write "$_asf_sshd" 644
+        else
+            printf 'PasswordAuthentication no\n' | atomic_write "$_asf_sshd" 644
+        fi
+        report_key ssh.password_authentication applied "fallback"
     fi
-    report_key ssh.password_authentication applied "fallback"
 
     _asf_keys=$(toml_array ssh.authorized_keys)
     if [ -n "$_asf_keys" ]; then
-        _asf_user=$(first_user)
+        # [user] made in userdb on an immutable image owns these keys, not the
+        # image's own UID 1000 account.
+        _asf_user=${PRIMARY_USER:-$(first_user)}
         [ -n "$_asf_user" ] || _asf_user=$(toml_get_default user.name pi)
-        _asf_home=$(user_home "$_asf_user")
-        [ -n "$_asf_home" ] || _asf_home="/home/$_asf_user"
-        _asf_home=$(target_path "$_asf_home")
-        _asf_ak="$_asf_home/.ssh/authorized_keys"
-        ensure_dir "$_asf_home/.ssh" 700
-        # Appended key by key, skipping any already present: every other applier
-        # is idempotent under re-apply, and this one used to grow a duplicate
-        # set of keys each time it ran.
-        printf '%s\n' "$_asf_keys" | while IFS= read -r _asf_k; do
-            [ -n "$_asf_k" ] || continue
-            grep -qxF -- "$_asf_k" "$_asf_ak" 2>/dev/null && continue
-            printf '%s\n' "$_asf_k" >>"$_asf_ak"
-        done
-        chmod 600 "$_asf_ak" 2>/dev/null || true
-        # sshd tolerates a root-owned authorized_keys, so this is not what keeps
-        # a key out; it is so the account can manage its own keys afterwards.
-        own_user_path "$_asf_user" "$_asf_home/.ssh" "$_asf_ak"
+        printf '%s\n' "$_asf_keys" | ssh_add_keys "$_asf_user"
         report_key ssh.authorized_keys applied "fallback"
     fi
     if [ -n "$(toml_array ssh.ssh_import_id)" ]; then

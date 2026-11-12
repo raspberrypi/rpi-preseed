@@ -512,4 +512,322 @@ EOF
     assert_contains "packages reported skipped without apt-get" \
         "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" "apt-get unavailable"
     rm -rf "$ROOT"
+
+    # --- [[users]]: create new accounts; an existing one has its password reset ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc/skel" "$ROOT/boot/firmware" "$ROOT/home/pi" "$ROOT/home/carol"
+    echo "skel" >"$ROOT/etc/skel/.profile"
+    cat >"$ROOT/etc/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+pi:x:1000:1000:,,,:/home/pi:/bin/bash
+carol:x:1001:1001:,,,:/home/carol:/bin/bash
+EOF
+    printf 'root:*:19000:0:99999:7:::\npi:*:19000:0:99999:7:::\ncarol:OLDHASH:19000:0:99999:7:::\n' >"$ROOT/etc/shadow"
+    printf 'root:x:0:\npi:x:1000:\ncarol:x:1001:\ngpio:x:997:\n' >"$ROOT/etc/group"
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[[users]]
+name = "bob"
+password = "$5$salt$BOBHASH"
+password_encrypted = true
+groups = ["gpio"]
+authorized_keys = ["ssh-ed25519 AAAA bob@host"]
+passwordless_sudo = true
+[[users]]
+name = "carol"
+password = "$5$salt$CAROLHASH"
+password_encrypted = true
+[[users]]
+name = "root"
+password = "$5$salt$ROOTHASH"
+password_encrypted = true
+EOF
+    rpp apply --phase base >/dev/null 2>&1
+    assert_contains "new user in passwd" "$(cat "$ROOT/etc/passwd")" "bob:x:1002:1002::/home/bob:/bin/bash"
+    assert_contains "new user's own group" "$(cat "$ROOT/etc/group")" "bob:x:1002:"
+    assert_contains "new user added to gpio" "$(cat "$ROOT/etc/group")" "gpio:x:997:bob"
+    assert_contains "new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
+    assert_file "new user's home from skel" "$ROOT/home/bob/.profile"
+    assert_contains "new user's key" "$(cat "$ROOT/home/bob/.ssh/authorized_keys" 2>/dev/null)" "bob@host"
+    assert_file "new user's sudoers drop-in" "$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd"
+    assert_contains "existing user's password reset" "$(cat "$ROOT/etc/shadow")" "carol:\$5\$salt\$CAROLHASH:"
+    assert_contains "reset is warned about" "$(cat "$ROOT/var/lib/rpi-preseed/log/base.log" 2>/dev/null)" "resetting its password"
+    assert_contains "system account left alone" "$(cat "$ROOT/etc/shadow")" "root:*:"
+    assert_contains "system account refusal reported" "$(cat "$ROOT/var/lib/rpi-preseed/report.json")" "system account"
+    assert_ncontains "[[users]] passwords redacted from the config" "$(cat "$CFG")" "BOBHASH"
+    # Re-apply: nobody is created twice and consumed passwords stay put.
+    rpp apply --phase base >/dev/null 2>&1
+    assert_eq "re-apply creates no duplicate" "$(grep -c '^bob:' "$ROOT/etc/passwd")" "1"
+    assert_contains "re-apply keeps the new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
+    rm -rf "$ROOT"
+
+    # --- A per-device config on the persistent partition wins over the boot one ---
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/persistent" "$ROOT/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    printf 'config_version = "1.0"\n[system]\nhostname = "fromboot"\n' >"$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$ROOT/persistent/rpi-preseed.toml" <<'EOF'
+config_version = "1.0"
+[system]
+hostname = "frompersistent"
+[wlan]
+ssid = "Net"
+password = "wifipassword1"
+EOF
+    env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$ROOT" \
+        sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
+    assert_eq "persistent config preferred" "$(cat "$ROOT/etc/hostname" 2>/dev/null)" "frompersistent"
+    assert_ncontains "persistent config redacted" "$(cat "$ROOT/persistent/rpi-preseed.toml")" "wifipassword1"
+    rm -rf "$ROOT"
+
+    # --- Read-only targets, as on an immutable image (image-rota) ---
+    # Real read-only bind mounts need a user namespace; skip where there is none.
+    if unshare -rm true 2>/dev/null; then
+        ROOT=$(mktemp -d)
+        mkdir -p "$ROOT/etc" "$ROOT/boot/firmware" "$ROOT/var" "$ROOT/home/pi"
+        echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+        echo raspberrypi >"$ROOT/etc/hostname"
+        printf '127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
+        : >"$ROOT/boot/firmware/config.txt"
+        CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+        cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[system]
+hostname = "rota"
+[wlan]
+ssid = "Net"
+password = "wifipassword1"
+[boot]
+config_txt = ["dtparam=audio=on"]
+EOF
+        mkdir -p "$ROOT/etc/NetworkManager/system-connections"
+        # _ti_ro "RO..." "RW..." [discover] — base apply with each RO dir
+        # (under ROOT) read-only, then each RW dir writable again, as
+        # image-rota's shared bind mounts are. "discover" leaves rpi-preseed
+        # to find the config itself.
+        _ti_ro() {
+            # shellcheck disable=SC2016  # expanded by the inner shell
+            unshare -rm sh -c '
+                r=$1
+                for d in $2; do
+                    mount --bind "$r$d" "$r$d" && mount -o remount,bind,ro "$r$d" || exit 99
+                done
+                for d in $3; do
+                    mount --bind "$r$d" "$r$d" && mount -o remount,bind,rw "$r$d" || exit 99
+                done
+                unset RPI_PRESEED_STATE_DIR RPI_PRESEED_BOOT_DIR
+                [ "$4" = discover ] || export RPI_PRESEED_CONFIG="$r/boot/firmware/rpi-preseed.toml"
+                RPI_PRESEED_ROOT="$r" sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base
+            ' sh "$ROOT" "$1" "$2" "${3:-}" >/dev/null 2>&1
+        }
+        _ti_rc=0
+        _ti_ro "/ /boot/firmware" "/var /home /etc/NetworkManager/system-connections" || _ti_rc=$?
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_eq "read-only root: apply completes" "$_ti_rc" "0"
+        assert_eq "read-only root: hostname untouched" "$(cat "$ROOT/etc/hostname")" "raspberrypi"
+        assert_contains "read-only root: hostname reported skipped" "$_ti_rep" \
+            '"key": "system.hostname", "status": "skipped", "detail": "read-only filesystem"'
+        assert_ncontains "read-only root: nothing read-only reported applied" "$_ti_rep" \
+            '"key": "system.hostname", "status": "applied"'
+        assert_contains "read-only root: Wi-Fi lands in the shared directory" \
+            "$(cat "$ROOT/etc/NetworkManager/system-connections/preconfigured.nmconnection" 2>/dev/null)" "ssid=Net"
+
+        # Accounts on a read-only /etc go to userdb records, which need
+        # nss-systemd; an account baked into the image is left alone.
+        rm -rf "$ROOT/var/lib"
+        cp "$CFG" "$CFG.orig"
+        mkdir -p "$ROOT/etc/userdb" "$ROOT/etc/skel"
+        echo skel >"$ROOT/etc/skel/.profile"
+        printf 'root:x:0:\nsudo:x:27:\npi:x:1000:\n' >"$ROOT/etc/group"
+        printf 'passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n' >"$ROOT/etc/nsswitch.conf"
+        cat >"$CFG" <<'EOF'
+config_version = "1.0"
+[[users]]
+name = "bob"
+password = "$y$j9T$salt$BOBHASH"
+password_encrypted = true
+groups = ["sudo"]
+authorized_keys = ["ssh-ed25519 AAAA bob@host"]
+[[users]]
+name = "pi"
+password = "$y$j9T$salt$PIHASH"
+password_encrypted = true
+EOF
+        _ti_ro "/ /boot/firmware" "/var /home /etc/userdb"
+        _ti_ud="$ROOT/etc/userdb"
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_contains "userdb: account record" "$(cat "$_ti_ud/bob.user" 2>/dev/null)" '"userName":"bob","uid":59999,"gid":59999'
+        assert_eq "userdb: lookup by number" "$(readlink "$_ti_ud/59999.user")" "bob.user"
+        assert_contains "userdb: own group" "$(cat "$_ti_ud/bob.group" 2>/dev/null)" '"groupName":"bob","gid":59999'
+        assert_contains "userdb: password hash" "$(cat "$_ti_ud/bob.user-privileged" 2>/dev/null)" 'BOBHASH'
+        assert_eq "userdb: hash readable by root alone" "$(stat -c %a "$_ti_ud/bob.user-privileged" 2>/dev/null)" "600"
+        assert_eq "userdb: sudo membership not empty" "$(wc -c <"$_ti_ud/bob:sudo.membership" 2>/dev/null | tr -d ' ')" "1"
+        assert_file "userdb: home from skel" "$ROOT/home/bob/.profile"
+        assert_contains "userdb: key in the home" "$(cat "$ROOT/home/bob/.ssh/authorized_keys" 2>/dev/null)" "bob@host"
+        assert_fail "userdb: image account untouched" "[ -e '$_ti_ud/pi.user-privileged' ]"
+        assert_contains "userdb: image account reported skipped" "$_ti_rep" \
+            '"key": "users.1.name", "status": "skipped", "detail": "read-only filesystem"'
+        if command -v python3 >/dev/null 2>&1; then
+            assert_ok "userdb: records are JSON" \
+                "for f in '$_ti_ud'/*.user '$_ti_ud'/*.group '$_ti_ud'/*.user-privileged; do python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \"\$f\" || exit 1; done"
+        fi
+        # Without nss-systemd the accounts could not log in, so it fails.
+        rm -rf "$ROOT/var/lib" "${_ti_ud:?}"/* "$ROOT/home/bob"
+        echo 'passwd: files' >"$ROOT/etc/nsswitch.conf"
+        sed -i 's/BOBHASH/BOBHASH2/' "$CFG"
+        _ti_ro "/ /boot/firmware" "/var /home /etc/userdb"
+        assert_contains "userdb: missing nss-systemd reported failed" \
+            "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+            '"key": "users.0.name", "status": "failed", "detail": "libnss-systemd missing"'
+        assert_fail "userdb: nothing written without nss-systemd" "[ -e '$_ti_ud/bob.user' ]"
+        mv "$CFG.orig" "$CFG"
+
+        # What Imager writes, unchanged, onto /bootfs (the first partition):
+        # [user] cannot rename the image's account, so it becomes a userdb
+        # account, and [ssh]'s keys go to it rather than to UID 1000.
+        rm -rf "$ROOT/var/lib" "${_ti_ud:?}"/* "$ROOT/home/bob"
+        printf 'passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n' >"$ROOT/etc/nsswitch.conf"
+        mkdir -p "$ROOT/bootfs"
+        mv "$CFG" "$CFG.orig"
+        cat >"$ROOT/bootfs/rpi-preseed.toml" <<'EOF'
+config_version = "1.0"
+[user]
+name = "alice"
+password = "$y$j9T$salt$ALICEHASH"
+password_encrypted = true
+groups = ["sudo"]
+[ssh]
+enabled = true
+authorized_keys = ["ssh-ed25519 AAAA alice@laptop"]
+EOF
+        _ti_ro "/ /boot/firmware" "/var /home /etc/userdb /bootfs" discover
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_contains "Imager [user]: made in userdb" "$(cat "$_ti_ud/alice.user" 2>/dev/null)" '"userName":"alice"'
+        assert_contains "Imager [user]: hash" "$(cat "$_ti_ud/alice.user-privileged" 2>/dev/null)" 'ALICEHASH'
+        assert_file "Imager [user]: sudo membership" "$_ti_ud/alice:sudo.membership"
+        assert_contains "Imager [user]: reported created" "$_ti_rep" '"key": "user.name", "status": "applied", "detail": "created"'
+        assert_contains "Imager [ssh]: keys go to that account" \
+            "$(cat "$ROOT/home/alice/.ssh/authorized_keys" 2>/dev/null)" "alice@laptop"
+        assert_fail "Imager [ssh]: not to the image's own account" "[ -e '$ROOT/home/pi/.ssh/authorized_keys' ]"
+        assert_ncontains "Imager config on /bootfs redacted" "$(cat "$ROOT/bootfs/rpi-preseed.toml")" "ALICEHASH"
+        mv "$CFG.orig" "$CFG"
+
+        rm -rf "$ROOT/var/lib"
+        _ti_rc=0
+        _ti_ro /boot/firmware /var || _ti_rc=$?
+        _ti_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+        assert_eq "read-only boot: apply succeeds" "$_ti_rc" "0"
+        assert_eq "read-only boot: hostname still applied" "$(cat "$ROOT/etc/hostname")" "rota"
+        assert_ncontains "read-only boot: config.txt untouched" "$(cat "$ROOT/boot/firmware/config.txt")" "audio"
+        assert_contains "read-only boot: config.txt reported skipped" "$_ti_rep" "read-only filesystem"
+        assert_contains "read-only boot: plain-text secrets warned" \
+            "$(cat "$ROOT/var/lib/rpi-preseed/log/base.log" 2>/dev/null)" "stay on it in plain text"
+        rm -rf "$ROOT"
+    else
+        echo "skip - read-only targets (no user namespaces)"
+    fi
+}
+
+# An A/B image's /etc is a writable tmpfs overlay: only what its slot-state
+# manifest keeps survives a reboot, so nothing else may be reported applied.
+t_slot_state() {
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc/sudoers.d" "$ROOT/boot/firmware" "$ROOT/home/pi" "$ROOT/usr/lib/rpi-image-gen"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    echo "pi:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
+    printf 'pi:x:1000:\nsudo:x:27:\n' >"$ROOT/etc/group"
+    printf 'pi:!::\nsudo:*::\n' >"$ROOT/etc/gshadow"
+    printf '127.0.0.1\tlocalhost\n127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
+    _ss_m="$ROOT/usr/lib/rpi-image-gen/slot-state.manifest"
+    _ss_decl() {
+        echo "# op path store seed bind" >"$_ss_m"
+        for _ss_f in hostname hosts passwd group shadow gshadow "$@"; do
+            echo "EarlyPersistFile /etc/$_ss_f /persistent/common/etc/$_ss_f - -" >>"$_ss_m"
+        done
+        echo "SharedPath /var/lib/rpi-preseed /persistent/shared/var/lib/rpi-preseed /usr/share/factory/var/lib/rpi-preseed optional" >>"$_ss_m"
+    }
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'TOML'
+config_version = "1.0"
+[system]
+hostname = "rota"
+[locale]
+keymap = "gb"
+[user]
+name = "alice"
+password = "$y$j9T$salt$ALICEHASH"
+password_encrypted = true
+passwordless_sudo = true
+groups = ["sudo"]
+TOML
+    rpp() {
+        env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
+            RPI_PRESEED_ROOT="$ROOT" RPI_PRESEED_CONFIG="$CFG" \
+            sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
+    }
+    cp "$CFG" "$CFG.orig"
+    _ss_decl
+    rpp
+    _ss_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    assert_eq "slot-state: kept hostname applied" "$(cat "$ROOT/etc/hostname" 2>/dev/null)" "rota"
+    assert_contains "slot-state: unkept keymap skipped" "$_ss_rep" \
+        '"key": "locale.keymap", "status": "skipped", "detail": "not persisted"'
+    assert_fail "slot-state: unkept keymap not written" "[ -e '$ROOT/etc/default/keyboard' ]"
+    assert_contains "slot-state: rename reported" "$_ss_rep" '"key": "user.name", "status": "applied", "detail": "fallback"'
+    assert_contains "slot-state: hash on the renamed account" "$(cat "$ROOT/etc/shadow")" "alice:\$y\$j9T\$salt\$ALICEHASH:"
+    assert_contains "slot-state: group renamed" "$(cat "$ROOT/etc/group")" "alice:x:1000:"
+    assert_contains "slot-state: home renamed" "$(cat "$ROOT/etc/passwd")" "alice:x:1000:1000:,,,:/home/alice:"
+    assert_contains "slot-state: unkept sudoers skipped" "$_ss_rep" \
+        '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not persisted"'
+
+    # The save runs before the config is consumed; if it fails, nothing is.
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd" "$ROOT/etc/shadow" "$ROOT/etc/group" "$ROOT/etc/gshadow"
+    mv "$ROOT/home/alice" "$ROOT/home/pi"
+    _ss_save="$ROOT/save"
+    # shellcheck disable=SC2016  # expanded by the stub
+    printf '#!/bin/sh\n[ -e "%s/var/lib/rpi-preseed/applied" ] && echo late >>"%s/saved"\ngrep -c ALICEHASH "%s/boot/firmware/rpi-preseed.toml" >>"%s/saved"\n' \
+        "$ROOT" "$ROOT" "$ROOT" "$ROOT" >"$_ss_save"
+    chmod +x "$_ss_save"
+    SLOT_STATE_SAVE="$_ss_save" rpp
+    assert_eq "slot-state: saved before stamp and redaction" "$(cat "$ROOT/saved" 2>/dev/null)" "1"
+    assert_file "slot-state: stamped after the save" "$ROOT/var/lib/rpi-preseed/applied"
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd" "$ROOT/etc/shadow" "$ROOT/etc/group" "$ROOT/etc/gshadow"
+    mv "$ROOT/home/alice" "$ROOT/home/pi"
+    printf '#!/bin/sh\nexit 1\n' >"$_ss_save"
+    _ss_rc=0; SLOT_STATE_SAVE="$_ss_save" rpp || _ss_rc=$?
+    assert_eq "slot-state: failed save fails the apply" "$_ss_rc" "1"
+    assert_fail "slot-state: failed save leaves no applied stamp" "[ -e '$ROOT/var/lib/rpi-preseed/applied' ]"
+    assert_contains "slot-state: failed save keeps the secrets" "$(cat "$CFG")" "ALICEHASH"
+
+    # With the sudoers file declared, it lands.
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    _ss_decl sudoers.d/010_rpi-preseed-nopasswd
+    rpp
+    assert_eq "slot-state: kept sudoers written" \
+        "$(cat "$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd" 2>/dev/null)" "alice ALL=(ALL) NOPASSWD: ALL"
+
+    # Account files not kept, and no userdb: the account is not touched.
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    sed -i '/passwd\|shadow\|group/d' "$_ss_m"
+    sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd"
+    rpp
+    assert_contains "slot-state: unkept accounts skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        '"key": "user.name", "status": "skipped", "detail": "not persisted"'
+    assert_contains "slot-state: unkept passwd untouched" "$(cat "$ROOT/etc/passwd")" "pi:x:1000:"
+
+    # No UID 1000 account in the image: [user] makes one.
+    rm -rf "$ROOT/var/lib" "$ROOT/home/alice"; cp "$CFG.orig" "$CFG"
+    _ss_decl
+    echo "root:x:0:0::/root:/bin/sh" >"$ROOT/etc/passwd"
+    echo "root:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
+    printf 'root:x:0:\nsudo:x:27:\n' >"$ROOT/etc/group"
+    rpp
+    assert_contains "no UID 1000: account created" "$(cat "$ROOT/etc/passwd")" "alice:x:1000:1000::/home/alice:/bin/bash"
+    assert_contains "no UID 1000: reported created" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        '"key": "user.name", "status": "applied", "detail": "created"'
+    assert_contains "no UID 1000: hash set" "$(cat "$ROOT/etc/shadow")" "ALICEHASH"
+    rm -rf "$ROOT"
 }

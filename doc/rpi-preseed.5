@@ -38,6 +38,47 @@ grants the account the ability to run
 for an unprompted sudoers drop-in. Groups that do not exist on the image are
 warned and skipped rather than failing the apply. Groups and sudo are applied to
 the effective account even when no rename or password is configured.
+When
+.I /etc
+is read-only, as on an immutable image, the UID 1000 account cannot be renamed;
+the named account is created as a userdb account instead, as for
+.BR [[users]] ,
+and receives
+.BR [ssh] 's
+.BR authorized_keys .
+.TP
+.B [[users]]
+.BR name ", " password ", " password_encrypted " (bool), " passwordless_sudo " (bool), " groups " (array), " authorized_keys " (array)."
+Additional accounts, one
+.B [[users]]
+table each;
+.B name
+is required and must be a valid login name. A missing account is created with
+a home from
+.I /etc/skel
+and
+.IR /bin/bash ,
+locked until a password or key is given. The config takes precedence over an
+existing account: its password is reset to the configured one, with a warning.
+System accounts (UID below 1000) are refused.
+When
+.I /etc
+is read-only, as on an immutable image, accounts are written as systemd userdb
+records in
+.I /etc/userdb
+instead, with IDs counting down from 59999; this needs
+.BR libnss-systemd .
+An account in the image's own
+.I /etc/passwd
+cannot change there and is reported skipped, as is
+.B passwordless_sudo
+unless
+.I /etc/sudoers.d
+is writable. Such accounts cannot change their own password, and programs not
+running as root (a screen locker, for instance) cannot check it.
+.B authorized_keys
+are installed for that account; sshd itself is enabled by
+.BR [ssh] .
 .TP
 .B [ssh]
 .BR enabled ", " password_authentication " (bool), " ssh_import_id " (array), " authorized_keys " (array)."
@@ -173,8 +214,27 @@ Each step is retried with backoff using the
 tunables.
 .SH FILES
 .TP
+.B /persistent/rpi-preseed.toml
+A per-device config on an immutable image's persistent partition. Read in
+preference to the boot partition's, which such an image shares with every
+device.
+.TP
+.B /bootfs/rpi-preseed.toml
+The same, on an rpi-image-gen A/B image's writable first partition, where
+Imager writes it.
+.TP
+.B /boot/firmware/rpi-preseed.toml
+The config, unless the kernel command line or one of the above gives one.
+.TP
 .B /var/lib/rpi-preseed/
 Stamps (applied, early-runcmd-done, runcmd-done, apply-failed), logs, and report.json.
+.TP
+.B /etc/rpi-image-gen/slot-shared.d/rpi-preseed.conf
+On an rpi-image-gen A/B image, keeps
+.I /var/lib/rpi-preseed
+and
+.I /etc/userdb
+on the persistent partition, shared by both slots.
 .TP
 .B /boot/firmware/rpi-preseed/
 Redacted status breadcrumb and collect-logs bundles.
@@ -182,3 +242,19 @@ Redacted status breadcrumb and collect-logs bundles.
 .BR rpi-preseed (8)
 .SH NOTES
 Secrets are removed and PII is tokenised in all logs and diagnostics bundles.
+.PP
+On an immutable image, a setting whose destination is read-only is reported
+skipped, not applied; one written to a directory the image shares from
+writable storage still applies. On an rpi-image-gen A/B image,
+.I /etc
+is writable but kept only where
+.I /usr/lib/rpi-image-gen/slot-state.manifest
+says, so a setting written anywhere else in it is reported skipped as not
+persisted. Passwordless sudo goes to
+.IR /etc/sudoers.d/010_rpi-preseed-nopasswd ,
+which such an image keeps with
+.BR EarlyPersistFile= .
+A config on a read-only partition cannot have
+its secrets redacted, so prefer
+.B password_encrypted
+hashes.

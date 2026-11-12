@@ -35,7 +35,10 @@ _apply_interface_toggle() {
         report_run "interfaces.$_ait_name" raspi-config "$RASPI_CONFIG" nonint "$_ait_fn" $((1 - _ait_on))
         return
     fi
-    [ "$_ait_on" -eq 1 ] && _append_once "$(_config_txt_path)" "$_ait_line"
+    if [ "$_ait_on" -eq 1 ]; then
+        writable_or_skip "interfaces.$_ait_name" "$(_config_txt_path)" || return 0
+        _append_once "$(_config_txt_path)" "$_ait_line"
+    fi
     report_key "interfaces.$_ait_name" applied fallback
 }
 
