@@ -90,7 +90,9 @@ do_base() {
             echo "rpi-preseed: config changed since last apply; run 'rpi-preseed apply' to re-apply" >&2
             return 0
         fi
-        if [ -f "$STAMP_FAILED" ] && \
+        # A config that would not parse or validate cannot do better unchanged;
+        # one whose settings failed is tried again each boot.
+        if [ -f "$STAMP_FAILED" ] && ! grep -q '^retry=1$' "$STAMP_FAILED" && \
            [ "$(stamp_fingerprint "$STAMP_FAILED")" = "$CONFIG_FINGERPRINT" ]; then
             echo "rpi-preseed: previous apply of this config failed; fix it and run 'rpi-preseed apply'" >&2
             return 0
@@ -127,11 +129,18 @@ do_base() {
     apply_connect
     apply_boot
 
+    # A failed setting may be the device's only login, so the config keeps its
+    # secrets for another go.
+    if report_has_failed; then
+        log_error "some settings failed; config left unconsumed, to be retried at the next boot"
+        _base_fail retry; toml_cleanup; return 1
+    fi
+
     # Before the config is consumed: a power cut after that must not find the
     # changes still in RAM.
     if ! save_persisted; then
         log_error "could not save /etc to persistent storage; config left unconsumed"
-        _base_fail; toml_cleanup; return 1
+        _base_fail retry; toml_cleanup; return 1
     fi
 
     redact_config_secrets "$_db_cfg"
@@ -145,8 +154,10 @@ do_base() {
     return 0
 }
 
+# _base_fail [retry] — record a failed apply; "retry" has the next boot try again.
 _base_fail() {
     write_stamp "$STAMP_FAILED"
+    [ "${1:-}" != retry ] || echo "retry=1" >>"$STAMP_FAILED"
     report_write failed
     redact_cleanup 2>/dev/null || true
 }

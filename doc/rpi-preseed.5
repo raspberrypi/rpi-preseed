@@ -254,6 +254,11 @@ persisted. Passwordless sudo goes to
 .IR /etc/sudoers.d/010_rpi-preseed-nopasswd ,
 which such an image keeps with
 .BR EarlyPersistFile= .
+.PP
+If any setting fails, the apply fails: the config keeps its secrets and is
+tried again at each boot until it applies. A config that does not parse or
+validate is not retried until it changes.
+.PP
 A config on a read-only partition cannot have
 its secrets redacted, so prefer
 .B password_encrypted

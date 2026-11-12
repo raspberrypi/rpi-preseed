@@ -7,6 +7,7 @@ rpi-preseed (0.2.2) trixie; urgency=medium
   * Let an unchanged Imager configure an immutable image
   * Report A/B /etc writes the slot-state manifest drops
   * Save an A/B image's /etc before consuming the config
+  * Fail the apply when a setting fails, and retry it at the next boot
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 12 Nov 2026 15:32:26 +0000
 

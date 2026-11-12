@@ -1,7 +1,8 @@
 # shellcheck shell=dash
 
-qemu_assert_stamp applied "$QEMU_RESULTS_DIR" present
+# A setting whose helper fails makes the apply fail: the config keeps its
+# secrets and the next boot tries again.
+qemu_assert_stamp applied "$QEMU_RESULTS_DIR" absent
+qemu_assert_stamp apply-failed "$QEMU_RESULTS_DIR" present
 qemu_assert_file "report.json captured" "$QEMU_RESULTS_DIR/report.json"
-# Hostname may fall back to file-based path when imager_custom fails; either way
-# base apply should complete and record outcomes.
 qemu_assert_contains "hostname key in report" "$QEMU_RESULTS_DIR/report.json" "system.hostname"

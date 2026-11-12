@@ -63,6 +63,11 @@ report_key() {
     printf '%s%s%s%s%s\n' "$1" "$US" "$2" "$US" "${3:-}" >>"$REPORT_KEYS" 2>/dev/null || true
 }
 
+# report_has_failed — did any key report failed?
+report_has_failed() {
+    awk -F"$US" '$2 == "failed" { f = 1 } END { exit !f }' "$REPORT_KEYS" 2>/dev/null
+}
+
 # report_runcmd PHASE INDEX COMMAND EXIT ATTEMPTS — record a runcmd outcome.
 report_runcmd() {
     [ -n "${REPORT_CMDS:-}" ] || return 0

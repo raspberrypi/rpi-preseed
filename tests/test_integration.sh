@@ -555,7 +555,24 @@ EOF
     assert_contains "reset is warned about" "$(cat "$ROOT/var/lib/rpi-preseed/log/base.log" 2>/dev/null)" "resetting its password"
     assert_contains "system account left alone" "$(cat "$ROOT/etc/shadow")" "root:*:"
     assert_contains "system account refusal reported" "$(cat "$ROOT/var/lib/rpi-preseed/report.json")" "system account"
+    # A failed setting fails the apply: the secrets stay for the next boot's
+    # retry, which succeeds once the cause has gone.
+    assert_contains "failed setting keeps the secrets" "$(cat "$CFG")" "BOBHASH"
+    assert_fail "failed setting leaves no applied stamp" "[ -e '$ROOT/var/lib/rpi-preseed/applied' ]"
+    assert_contains "failed setting reported failed" "$(cat "$ROOT/var/lib/rpi-preseed/report.json")" '"status": "failed"'
+    sed -i 's/^root:x:0:/root:x:1003:/' "$ROOT/etc/passwd"
+    rpp apply-base >/dev/null 2>&1
+    assert_file "next boot retries a failed apply" "$ROOT/var/lib/rpi-preseed/applied"
+    assert_fail "retry clears the failed stamp" "[ -e '$ROOT/var/lib/rpi-preseed/apply-failed' ]"
     assert_ncontains "[[users]] passwords redacted from the config" "$(cat "$CFG")" "BOBHASH"
+    # An invalid config is not retried: it cannot do better unchanged.
+    cp "$CFG" "$CFG.good"
+    echo 'nonsense = [' >>"$CFG"
+    rm -f "$ROOT/var/lib/rpi-preseed/applied"
+    rpp apply-base >/dev/null 2>&1
+    _ti_err=$(rpp apply-base 2>&1 >/dev/null)
+    assert_contains "invalid config not retried" "$_ti_err" "previous apply of this config failed"
+    mv "$CFG.good" "$CFG"
     # Re-apply: nobody is created twice and consumed passwords stay put.
     rpp apply --phase base >/dev/null 2>&1
     assert_eq "re-apply creates no duplicate" "$(grep -c '^bob:' "$ROOT/etc/passwd")" "1"
