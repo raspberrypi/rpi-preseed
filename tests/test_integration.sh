@@ -550,7 +550,7 @@ EOF
     assert_contains "new user's hash" "$(cat "$ROOT/etc/shadow")" "bob:\$5\$salt\$BOBHASH:"
     assert_file "new user's home from skel" "$ROOT/home/bob/.profile"
     assert_contains "new user's key" "$(cat "$ROOT/home/bob/.ssh/authorized_keys" 2>/dev/null)" "bob@host"
-    assert_file "new user's sudoers drop-in" "$ROOT/etc/sudoers.d/010_bob-nopasswd"
+    assert_file "new user's sudoers drop-in" "$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd"
     assert_contains "existing user's password reset" "$(cat "$ROOT/etc/shadow")" "carol:\$5\$salt\$CAROLHASH:"
     assert_contains "reset is warned about" "$(cat "$ROOT/var/lib/rpi-preseed/log/base.log" 2>/dev/null)" "resetting its password"
     assert_contains "system account left alone" "$(cat "$ROOT/etc/shadow")" "root:*:"
@@ -727,4 +727,86 @@ EOF
     else
         echo "skip - read-only targets (no user namespaces)"
     fi
+}
+
+# An A/B image's /etc is a writable tmpfs overlay: only what its slot-state
+# manifest keeps survives a reboot, so nothing else may be reported applied.
+t_slot_state() {
+    ROOT=$(mktemp -d)
+    mkdir -p "$ROOT/etc/sudoers.d" "$ROOT/boot/firmware" "$ROOT/home/pi" "$ROOT/usr/lib/rpi-image-gen"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
+    echo "pi:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
+    printf 'pi:x:1000:\nsudo:x:27:\n' >"$ROOT/etc/group"
+    printf 'pi:!::\nsudo:*::\n' >"$ROOT/etc/gshadow"
+    printf '127.0.0.1\tlocalhost\n127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
+    _ss_m="$ROOT/usr/lib/rpi-image-gen/slot-state.manifest"
+    _ss_decl() {
+        echo "# op path store seed bind" >"$_ss_m"
+        for _ss_f in hostname hosts passwd group shadow gshadow "$@"; do
+            echo "EarlyPersistFile /etc/$_ss_f /persistent/common/etc/$_ss_f - -" >>"$_ss_m"
+        done
+        echo "SharedPath /var/lib/rpi-preseed /persistent/shared/var/lib/rpi-preseed /usr/share/factory/var/lib/rpi-preseed optional" >>"$_ss_m"
+    }
+    CFG="$ROOT/boot/firmware/rpi-preseed.toml"
+    cat >"$CFG" <<'TOML'
+config_version = "1.0"
+[system]
+hostname = "rota"
+[locale]
+keymap = "gb"
+[user]
+name = "alice"
+password = "$y$j9T$salt$ALICEHASH"
+password_encrypted = true
+passwordless_sudo = true
+groups = ["sudo"]
+TOML
+    rpp() {
+        env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR \
+            RPI_PRESEED_ROOT="$ROOT" RPI_PRESEED_CONFIG="$CFG" \
+            sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
+    }
+    cp "$CFG" "$CFG.orig"
+    _ss_decl
+    rpp
+    _ss_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    assert_eq "slot-state: kept hostname applied" "$(cat "$ROOT/etc/hostname" 2>/dev/null)" "rota"
+    assert_contains "slot-state: unkept keymap skipped" "$_ss_rep" \
+        '"key": "locale.keymap", "status": "skipped", "detail": "not persisted"'
+    assert_fail "slot-state: unkept keymap not written" "[ -e '$ROOT/etc/default/keyboard' ]"
+    assert_contains "slot-state: rename reported" "$_ss_rep" '"key": "user.name", "status": "applied", "detail": "fallback"'
+    assert_contains "slot-state: hash on the renamed account" "$(cat "$ROOT/etc/shadow")" "alice:\$y\$j9T\$salt\$ALICEHASH:"
+    assert_contains "slot-state: group renamed" "$(cat "$ROOT/etc/group")" "alice:x:1000:"
+    assert_contains "slot-state: home renamed" "$(cat "$ROOT/etc/passwd")" "alice:x:1000:1000:,,,:/home/alice:"
+    assert_contains "slot-state: unkept sudoers skipped" "$_ss_rep" \
+        '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not persisted"'
+
+    # With the sudoers file declared, it lands.
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    _ss_decl sudoers.d/010_rpi-preseed-nopasswd
+    rpp
+    assert_eq "slot-state: kept sudoers written" \
+        "$(cat "$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd" 2>/dev/null)" "alice ALL=(ALL) NOPASSWD: ALL"
+
+    # Account files not kept, and no userdb: the account is not touched.
+    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
+    sed -i '/passwd\|shadow\|group/d' "$_ss_m"
+    sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd"
+    rpp
+    assert_contains "slot-state: unkept accounts skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        '"key": "user.name", "status": "skipped", "detail": "not persisted"'
+    assert_contains "slot-state: unkept passwd untouched" "$(cat "$ROOT/etc/passwd")" "pi:x:1000:"
+
+    # No UID 1000 account in the image: [user] makes one.
+    rm -rf "$ROOT/var/lib" "$ROOT/home/alice"; cp "$CFG.orig" "$CFG"
+    _ss_decl
+    echo "root:x:0:0::/root:/bin/sh" >"$ROOT/etc/passwd"
+    echo "root:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
+    printf 'root:x:0:\nsudo:x:27:\n' >"$ROOT/etc/group"
+    rpp
+    assert_contains "no UID 1000: account created" "$(cat "$ROOT/etc/passwd")" "alice:x:1000:1000::/home/alice:/bin/bash"
+    assert_contains "no UID 1000: reported created" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        '"key": "user.name", "status": "applied", "detail": "created"'
+    assert_contains "no UID 1000: hash set" "$(cat "$ROOT/etc/shadow")" "ALICEHASH"
+    rm -rf "$ROOT"
 }

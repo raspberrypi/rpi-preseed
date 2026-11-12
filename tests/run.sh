@@ -62,6 +62,7 @@ echo "== modes =="        ; t_modes
 echo "== written files ==" ; t_written_modes
 echo "== connect device token ==" ; t_connect_device_token
 echo "== integration ==" ; t_integration
+echo "== slot state ==" ; t_slot_state
 
 echo "-------------------------------------"
 printf '%d tests, %d failures\n' "$TESTS" "$FAILS"

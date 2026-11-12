@@ -291,14 +291,37 @@ writable_dir() {
     rm -f "$_wd_probe"
 }
 
-# writable_or_skip KEY PATH — succeed if PATH can be written; otherwise report
-# KEY skipped. An immutable image mounts /boot/firmware read-only.
+: "${SLOT_STATE_MANIFEST:=/usr/lib/rpi-image-gen/slot-state.manifest}"
+
+# persists PATH — would a write to target path PATH survive a reboot? An
+# rpi-image-gen A/B image's /etc is writable but on tmpfs: only what its
+# slot-state manifest declares is saved.
+persists() {
+    _ps_m=$(target_path "$SLOT_STATE_MANIFEST")
+    [ -f "$_ps_m" ] || return 0
+    _ps_p=${1#"$RPI_PRESEED_ROOT"}
+    case "$_ps_p" in /etc/*) ;; *) return 0 ;; esac
+    awk -v p="$_ps_p" '
+        $1 == "EarlyPersistFile" && $2 == p { f = 1 }
+        ($1 == "SharedPath" || $1 == "StaticPath") &&
+            (p == $2 || index(p, $2 "/") == 1) { f = 1 }
+        END { exit !f }' "$_ps_m"
+}
+
+# writable_or_skip KEY PATH — succeed if PATH can be written and will persist;
+# otherwise report KEY skipped. An immutable image mounts /boot/firmware
+# read-only.
 writable_or_skip() {
     _wos_d=$(dirname "$2")
     while [ ! -d "$_wos_d" ]; do _wos_d=$(dirname "$_wos_d"); done
-    writable_dir "$_wos_d" && return 0
-    log_warn "$1: $_wos_d is read-only; not applied"
-    report_key "$1" skipped "read-only filesystem"
+    if ! writable_dir "$_wos_d"; then
+        log_warn "$1: $_wos_d is read-only; not applied"
+        report_key "$1" skipped "read-only filesystem"
+        return 1
+    fi
+    persists "$2" && return 0
+    log_warn "$1: ${2#"$RPI_PRESEED_ROOT"} would be lost at reboot; the slot-state manifest does not keep it"
+    report_key "$1" skipped "not persisted"
     return 1
 }
 
