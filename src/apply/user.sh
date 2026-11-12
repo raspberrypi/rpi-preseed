@@ -21,7 +21,7 @@ apply_user() {
     # An immutable image's UID 1000 account lives in its read-only /etc/passwd
     # and cannot be renamed, so the named account is made in userdb instead.
     # This is what lets an unchanged Imager configure such an image.
-    if ! writable_dir "$(target_path /etc)"; then
+    if ! _accounts_writable; then
         if toml_present user.name && _select_users_backend user.name && \
            [ "$USERS_BACKEND" = userdb ]; then
             _apply_one_user user || return 1
@@ -30,14 +30,20 @@ apply_user() {
             return 0
         fi
         for _au_k in name password passwordless_sudo groups; do
-            toml_present "user.$_au_k" && report_key "user.$_au_k" skipped "read-only filesystem"
+            toml_present "user.$_au_k" && report_key "user.$_au_k" skipped "$ACCOUNTS_WHY"
         done
-        log_warn "user: /etc is read-only, so the UID 1000 account cannot change"
+        log_warn "user: /etc/passwd is $ACCOUNTS_WHY, so the UID 1000 account cannot change"
         return 0
     fi
+    USERS_BACKEND=passwd
 
     _au_prev=$(first_user)
-    [ -n "$_au_prev" ] || _au_prev=pi
+    if [ -z "$_au_prev" ] && ! toml_present user.name; then
+        for _au_k in password passwordless_sudo groups; do
+            toml_present "user.$_au_k" && report_key "user.$_au_k" skipped "no UID 1000 account"
+        done
+        return 0
+    fi
 
     # Effective account name: the rename target if given, else the current UID
     # 1000 login. Everything downstream (sudo, groups) keys off this so it keeps
@@ -75,16 +81,29 @@ apply_user() {
             return 1
         fi
 
-        if helpers_live && [ -x "$USERCONF" ]; then
-            if "$USERCONF" "$_au_prev" "$_au_new" "$_au_hash"; then
-                report_key user.name applied "userconf"
-                [ -n "$_au_hash" ] && report_key user.password applied "userconf"
-            else
-                report_key user.name failed "userconf"; return 1
-            fi
+        # The image may have no UID 1000 account, or no userconf-pi.
+        if [ -z "$_au_prev" ]; then
+            _au_how=created
+            _create_first_user "$_au_new" "$_au_hash"
+        elif helpers_live && [ -x "$USERCONF" ]; then
+            _au_how=userconf
+            "$USERCONF" "$_au_prev" "$_au_new" "$_au_hash"
+        elif helpers_live; then
+            _au_how=usermod
+            _rename_user_live "$_au_prev" "$_au_new" "$_au_hash"
         else
+            _au_how=fallback
             _apply_user_fallback "$_au_prev" "$_au_new" "$_au_hash"
         fi
+        _au_rc=$?
+        if [ "$_au_rc" -ne 0 ] || [ "$(first_user)" != "$_au_new" ]; then
+            log_error "user: UID 1000 is not '$_au_new' after $_au_how"
+            report_key user.name failed "$_au_how"
+            [ -n "$_au_hash" ] && report_key user.password failed "$_au_how"
+            return 1
+        fi
+        report_key user.name applied "$_au_how"
+        [ -n "$_au_hash" ] && report_key user.password applied "$_au_how"
     fi
 
     if toml_bool user.passwordless_sudo false; then
@@ -119,9 +138,9 @@ apply_users() {
 # accounts as drop-in records instead, from a directory it can share. KEYs are
 # reported when no account can be made.
 _select_users_backend() {
-    if writable_dir "$(target_path /etc)"; then
+    if _accounts_writable; then
         USERS_BACKEND=passwd
-    elif writable_dir "$(target_path /etc/userdb)"; then
+    elif writable_dir "$(target_path /etc/userdb)" && persists "$(target_path /etc/userdb)"; then
         USERS_BACKEND=userdb
         if ! grep -Eq '^passwd:.*[[:space:]]systemd' "$(target_path /etc/nsswitch.conf)" 2>/dev/null; then
             log_error "users: /etc/passwd is read-only and NSS does not read userdb; install libnss-systemd"
@@ -130,10 +149,21 @@ _select_users_backend() {
         fi
     else
         USERS_BACKEND=none
-        log_warn "users: neither /etc nor /etc/userdb is writable; no accounts added"
-        for _sub_k in "$@"; do report_key "$_sub_k" skipped "read-only filesystem"; done
+        log_warn "users: neither /etc/passwd nor /etc/userdb would keep an account; none added"
+        for _sub_k in "$@"; do report_key "$_sub_k" skipped "$ACCOUNTS_WHY"; done
     fi
     return 0
+}
+
+# _accounts_writable — can /etc/passwd and its siblings be changed for good?
+# If not, ACCOUNTS_WHY says why, as a report detail.
+_accounts_writable() {
+    ACCOUNTS_WHY="read-only filesystem"
+    writable_dir "$(target_path /etc)" || return 1
+    ACCOUNTS_WHY="not persisted"
+    for _acw_f in passwd shadow group gshadow; do
+        persists "$(target_path "/etc/$_acw_f")" || return 1
+    done
 }
 
 # _apply_one_user PREFIX — apply the [[users]] entry whose keys start PREFIX.
@@ -274,12 +304,51 @@ _set_user_hash() {
     fi
 }
 
-# _apply_user_sudo USER PREFIX — a sudoers drop-in letting USER skip the password.
+# Every account's NOPASSWD rule, in one file: a fixed name is one an A/B image
+# can declare with EarlyPersistFile=.
+SUDOERS_NOPASSWD=/etc/sudoers.d/010_rpi-preseed-nopasswd
+
+# _apply_user_sudo USER PREFIX — let USER sudo without a password.
 _apply_user_sudo() {
-    _ausu_f=$(target_path "/etc/sudoers.d/010_${1}-nopasswd")
+    _ausu_f=$(target_path "$SUDOERS_NOPASSWD")
     writable_or_skip "$2.passwordless_sudo" "$_ausu_f" || return 0
-    printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$1" | atomic_write "$_ausu_f" 440
+    if ! grep -q "^$1 " "$_ausu_f" 2>/dev/null; then
+        { cat "$_ausu_f" 2>/dev/null; printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$1"; } \
+            | atomic_write "$_ausu_f" 440 || { report_key "$2.passwordless_sudo" failed; return 1; }
+    fi
     report_key "$2.passwordless_sudo" applied
+}
+
+# _create_first_user NAME HASH — make NAME the UID 1000 account.
+_create_first_user() {
+    if ! helpers_live; then
+        _create_user_fallback "$1" || return 1
+    elif getent group 1000 >/dev/null 2>&1; then
+        useradd -m -u 1000 -g 1000 -s /bin/bash "$1" || return 1
+    else
+        useradd -m -u 1000 -U -s /bin/bash "$1" || return 1
+    fi
+    [ -z "$2" ] || _set_user_hash "$1" "$2"
+}
+
+# _rename_user_live PREV NEW HASH — what userconf-pi does, for an image without
+# it. Its cancel-rename display-manager fix-ups come with it, so are not done.
+_rename_user_live() {
+    if [ "$1" != "$2" ]; then
+        usermod -l "$2" "$1" || return 1
+        usermod -m -d "/home/$2" "$2" || return 1
+        if getent group "$1" >/dev/null 2>&1; then
+            groupmod -n "$2" "$1" || return 1
+        fi
+        for _rul_f in /etc/subuid /etc/subgid; do
+            [ -f "$_rul_f" ] && sed -i "s/^$1:/$2:/" "$_rul_f"
+        done
+        for _rul_f in /etc/sudoers.d/010_pi-nopasswd "$SUDOERS_NOPASSWD"; do
+            [ -f "$_rul_f" ] && sed -i "s/^$1 /$2 /" "$_rul_f"
+        done
+    fi
+    usermod -s /bin/bash "$2" || return 1
+    [ -z "$3" ] || printf '%s:%s\n' "$2" "$3" | chpasswd -e
 }
 
 # _apply_user_groups USER PREFIX — add USER to each group in PREFIX.groups.
@@ -356,17 +425,15 @@ _add_user_to_group() {
 # _apply_user_fallback PREV NEW HASH — sandbox-only edit of passwd/shadow.
 _apply_user_fallback() {
     _auf_prev="$1"; _auf_new="$2"; _auf_hash="$3"
-    _auf_passwd=$(target_path /etc/passwd)
-    _auf_shadow=$(target_path /etc/shadow)
-    if [ -f "$_auf_passwd" ] && [ "$_auf_prev" != "$_auf_new" ]; then
-        sed -i "s/^$_auf_prev:/$_auf_new:/" "$_auf_passwd" 2>/dev/null || true
+    if [ "$_auf_prev" != "$_auf_new" ]; then
+        for _auf_f in passwd shadow group gshadow; do
+            _auf_p=$(target_path "/etc/$_auf_f")
+            [ -f "$_auf_p" ] || continue
+            sed -e "s/^$_auf_prev:/$_auf_new:/" -e "/^$_auf_new:/s|:/home/$_auf_prev:|:/home/$_auf_new:|" \
+                "$_auf_p" | atomic_write "$_auf_p" || return 1
+        done
+        _auf_h=$(target_path /home)
+        [ -d "$_auf_h/$_auf_prev" ] && [ ! -e "$_auf_h/$_auf_new" ] && mv "$_auf_h/$_auf_prev" "$_auf_h/$_auf_new"
     fi
-    if [ -n "$_auf_hash" ] && [ -f "$_auf_shadow" ]; then
-        # Replace the hash field for the (possibly renamed) user.
-        awk -F: -v u="$_auf_new" -v h="$_auf_hash" 'BEGIN{OFS=":"}
-            $1==u {$2=h} {print}' "$_auf_shadow" >"$_auf_shadow.tmp" 2>/dev/null \
-            && mv -f "$_auf_shadow.tmp" "$_auf_shadow"
-    fi
-    report_key user.name applied "fallback"
-    [ -n "$_auf_hash" ] && report_key user.password applied "fallback"
+    [ -z "$_auf_hash" ] || _set_user_hash "$_auf_new" "$_auf_hash"
 }

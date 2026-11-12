@@ -128,7 +128,7 @@ etc/hostname|644
 etc/hosts|644
 etc/ssh/sshd_config.d/rpi-preseed.conf|644
 etc/systemd/timesyncd.conf.d/10-rpi-preseed.conf|644
-etc/sudoers.d/010_alice-nopasswd|440
+etc/sudoers.d/010_rpi-preseed-nopasswd|440
 etc/NetworkManager/system-connections/preconfigured.nmconnection|600
 etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection|600
 boot/firmware/cmdline.txt|644
