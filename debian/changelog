@@ -1,3 +1,14 @@
+rpi-preseed (0.2.2) trixie; urgency=medium
+
+  * Create additional accounts from [[users]]
+  * Report read-only targets skipped rather than applied
+  * Read a per-device config from the persistent partition
+  * Add [[users]] accounts as userdb records on a read-only /etc
+  * Let an unchanged Imager configure an immutable image
+  * Report A/B /etc writes the slot-state manifest drops
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 12 Nov 2026 15:32:26 +0000
+
 rpi-preseed (0.2.1) trixie; urgency=medium
 
   [ Tom Dewey ]
