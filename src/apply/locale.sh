@@ -6,12 +6,17 @@ apply_locale() {
 
     if toml_present locale.timezone; then
         _al_tz=$(toml_get locale.timezone)
-        if ! writable_or_skip locale.timezone "$(target_path /etc/timezone)"; then
+        # /etc/localtime is what sets the zone; an image that cannot keep it
+        # cannot keep a timezone.
+        if ! { writable_or_skip locale.timezone "$(target_path /etc/timezone)" &&
+               writable_or_skip locale.timezone "$(target_path /etc/localtime)"; }; then
             :
         elif imager_available; then
             report_run locale.timezone imager_custom "$IMAGER_CUSTOM" set_timezone "$_al_tz"
         else
             printf '%s\n' "$_al_tz" | atomic_write "$(target_path /etc/timezone)" 644
+            [ -e "$(target_path "/usr/share/zoneinfo/$_al_tz")" ] &&
+                ln -sfn "/usr/share/zoneinfo/$_al_tz" "$(target_path /etc/localtime)"
             report_key locale.timezone applied fallback
         fi
         _al_did=1
@@ -113,27 +118,39 @@ _labwc_env_write() {
     fi
 }
 
-# _apply_locales — enable locales in /etc/locale.gen and set /etc/default/locale.
+# _apply_locales — enable locales in /etc/locale.gen and set the default one.
+# The two are kept apart: an immutable image cannot generate a locale, but can
+# still select one it ships.
 _apply_locales() {
     _algen=$(target_path /etc/locale.gen)
-    writable_or_skip locale.locales "$_algen" || return 0
-    if [ -f "$_algen" ]; then
-        toml_array locale.locales | while IFS= read -r _al_l; do
-            [ -n "$_al_l" ] || continue
-            sed -i "s/^# *\(${_al_l} .*\)/\1/" "$_algen" 2>/dev/null || true
-            grep -q "^${_al_l}" "$_algen" 2>/dev/null || printf '%s UTF-8\n' "$_al_l" >>"$_algen"
-        done
-    else
-        toml_array locale.locales | sed 's/$/ UTF-8/' | atomic_write "$_algen"
+    if writable_or_skip locale.locales "$_algen"; then
+        if [ -f "$_algen" ]; then
+            toml_array locale.locales | while IFS= read -r _al_l; do
+                [ -n "$_al_l" ] || continue
+                sed -i "s/^# *\(${_al_l} .*\)/\1/" "$_algen" 2>/dev/null || true
+                grep -q "^${_al_l}" "$_algen" 2>/dev/null || printf '%s UTF-8\n' "$_al_l" >>"$_algen"
+            done
+        else
+            toml_array locale.locales | sed 's/$/ UTF-8/' | atomic_write "$_algen"
+        fi
+        if helpers_live && have locale-gen; then
+            locale-gen >/dev/null 2>&1 || true
+        fi
+        report_key locale.locales applied
     fi
+
+    # trixie's /etc/default/locale is a link to /etc/locale.conf. Writing
+    # through the link's name would replace it with a file, and it is the
+    # target an image has to keep.
+    _al_conf=/etc/default/locale
+    [ -L "$(target_path "$_al_conf")" ] && _al_conf=/etc/locale.conf
+    _al_conf=$(target_path "$_al_conf")
+    writable_or_skip locale.lang "$_al_conf" || return 0
     _al_lang=$(toml_get_default locale.lang "$(toml_array locale.locales | head -n1)")
     {
         printf 'LANG=%s\n' "$_al_lang"
         toml_present locale.lc_time && printf 'LC_TIME=%s\n' "$(toml_get locale.lc_time)"
         toml_present locale.lc_measurement && printf 'LC_MEASUREMENT=%s\n' "$(toml_get locale.lc_measurement)"
-    } | atomic_write "$(target_path /etc/default/locale)" 644
-    if helpers_live && have locale-gen; then
-        locale-gen >/dev/null 2>&1 || true
-    fi
-    report_key locale.locales applied
+    } | atomic_write "$_al_conf" 644
+    report_key locale.lang applied
 }
