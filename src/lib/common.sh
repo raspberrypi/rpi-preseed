@@ -295,7 +295,8 @@ writable_dir() {
 
 # persists PATH — would a write to target path PATH survive a reboot? An
 # rpi-image-gen A/B image's /etc is writable but on tmpfs: only what its
-# slot-state manifest declares is saved.
+# slot-state manifest declares is saved. StaticPath= does not count: the image
+# owns those and replaces them at every boot.
 persists() {
     _ps_m=$(target_path "$SLOT_STATE_MANIFEST")
     [ -f "$_ps_m" ] || return 0
@@ -303,8 +304,7 @@ persists() {
     case "$_ps_p" in /etc/*) ;; *) return 0 ;; esac
     awk -v p="$_ps_p" '
         $1 == "EarlyPersistFile" && $2 == p { f = 1 }
-        ($1 == "SharedPath" || $1 == "StaticPath") &&
-            (p == $2 || index(p, $2 "/") == 1) { f = 1 }
+        $1 == "SharedPath" && (p == $2 || index(p, $2 "/") == 1) { f = 1 }
         END { exit !f }' "$_ps_m"
 }
 

@@ -848,3 +848,52 @@ TOML
     assert_contains "no UID 1000: hash set" "$(cat "$ROOT/etc/shadow")" "ALICEHASH"
     rm -rf "$ROOT"
 }
+
+# What an A/B image's /etc cannot do, from the review of the image-rota work.
+t_rota_etc() {
+    _re_r=$(mktemp -d)
+    mkdir -p "$_re_r/etc/default" "$_re_r/boot/firmware" "$_re_r/usr/lib/rpi-image-gen" \
+        "$_re_r/usr/share/zoneinfo/Europe"
+    : >"$_re_r/usr/share/zoneinfo/Europe/London"
+    echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
+    ln -s ../locale.conf "$_re_r/etc/default/locale"
+    cat >"$_re_r/boot/firmware/rpi-preseed.toml" <<'TOML'
+config_version = "1.0"
+[locale]
+timezone = "Europe/London"
+locales = ["en_GB.UTF-8"]
+TOML
+    _re_m="$_re_r/usr/lib/rpi-image-gen/slot-state.manifest"
+    _re_run() {
+        env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$_re_r" \
+            sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
+    }
+
+    # No manifest: an ordinary image.
+    _re_run
+    assert_ok "default locale is still a link" "[ -L '$_re_r/etc/default/locale' ]"
+    assert_eq "LANG written through the link" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
+    assert_eq "localtime points at the zone" "$(readlink "$_re_r/etc/localtime")" \
+        "/usr/share/zoneinfo/Europe/London"
+
+    # An image that replaces a path at every boot does not keep it.
+    echo "StaticPath /etc/static /usr/share/factory/etc/static - -" >"$_re_m"
+    echo "SharedPath /etc/shared /persistent/shared/etc/shared - -" >>"$_re_m"
+    assert_fail "StaticPath is not kept" "RPI_PRESEED_ROOT='$_re_r' persists /etc/static/x"
+    assert_ok "SharedPath is kept" "RPI_PRESEED_ROOT='$_re_r' persists /etc/shared/x"
+
+    # The link's target is what the manifest has to name; localtime it cannot.
+    echo "EarlyPersistFile /etc/locale.conf /persistent/common/etc/locale.conf - -" >>"$_re_m"
+    echo "EarlyPersistFile /etc/timezone /persistent/common/etc/timezone - -" >>"$_re_m"
+    echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
+    rm -rf "$_re_r/var/lib" "$_re_r/etc/localtime" "$_re_r/etc/timezone"
+    _re_run
+    _re_rep=$(cat "$_re_r/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    assert_eq "kept locale.conf written" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
+    assert_contains "ungeneratable locales skipped" "$_re_rep" \
+        '"key": "locale.locales", "status": "skipped", "detail": "not persisted"'
+    assert_contains "unkept localtime skips the timezone" "$_re_rep" \
+        '"key": "locale.timezone", "status": "skipped", "detail": "not persisted"'
+    assert_fail "timezone not half-written" "[ -e '$_re_r/etc/timezone' ]"
+    rm -rf "$_re_r"
+}
