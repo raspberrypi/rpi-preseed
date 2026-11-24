@@ -12,6 +12,7 @@ rpi-preseed (0.2.2) trixie; urgency=medium
     A/B image
   * Stop treating StaticPath= as kept, and write locale and timezone
     where an A/B image can keep them
+  * Declare the paths each configuration domain writes
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 12 Nov 2026 15:32:26 +0000
 

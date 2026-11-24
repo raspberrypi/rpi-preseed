@@ -240,6 +240,12 @@ and
 .I /etc/userdb
 on the persistent partition, shared by both slots.
 .TP
+.B /usr/share/rpi-preseed/paths
+Every path each section can write, one
+.I domain kind path
+line each, for an image build that must declare what survives a reboot. The
+file's header describes the kinds.
+.TP
 .B /boot/firmware/rpi-preseed/
 Redacted status breadcrumb and collect-logs bundles.
 .SH SEE ALSO

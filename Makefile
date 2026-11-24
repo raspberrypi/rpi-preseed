@@ -26,7 +26,7 @@ install:
 	install -d $(DESTDIR)$(BINDIR)
 	ln -sf $(LIBDIR)/rpi-preseed $(DESTDIR)$(BINDIR)/rpi-preseed
 	install -d $(DESTDIR)$(SHAREDIR)
-	install -m 0644 schema/rpi-preseed.schema $(DESTDIR)$(SHAREDIR)/
+	install -m 0644 schema/rpi-preseed.schema schema/paths $(DESTDIR)$(SHAREDIR)/
 	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(UNITDIR)/user@.service.d
 	install -m 0644 systemd/*.service systemd/*.target $(DESTDIR)$(UNITDIR)/
 	install -m 0644 systemd/user@.service.d/10-rpi-preseed.conf $(DESTDIR)$(UNITDIR)/user@.service.d/
@@ -41,7 +41,7 @@ check: shellcheck test
 
 shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck not installed; skipping"; exit 0; }
-	shellcheck -x $(SCRIPTS) debian/tests/installed tests/run.sh tests/test_toml.sh tests/test_validate.sh tests/test_redact.sh tests/test_hash.sh tests/test_ownership.sh tests/test_modes.sh tests/test_integration.sh
+	shellcheck -x $(SCRIPTS) debian/tests/installed tests/run.sh tests/test_toml.sh tests/test_validate.sh tests/test_redact.sh tests/test_hash.sh tests/test_ownership.sh tests/test_modes.sh tests/test_integration.sh tests/test_paths.sh
 	shellcheck -x $(QEMU_SCRIPTS)
 	@echo "shellcheck OK"
 
