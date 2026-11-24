@@ -293,6 +293,14 @@ writable_dir() {
 
 : "${SLOT_STATE_MANIFEST:=/usr/lib/rpi-image-gen/slot-state.manifest}"
 
+# has_slot_state — is this an rpi-image-gen A/B image?
+has_slot_state() {
+    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ]
+}
+
+# Applies of one config before its failed settings are given up on.
+: "${RPI_PRESEED_BASE_ATTEMPTS:=3}"
+
 # persists PATH — would a write to target path PATH survive a reboot? An
 # rpi-image-gen A/B image's /etc is writable but on tmpfs: only what its
 # slot-state manifest declares is saved. StaticPath= does not count: the image

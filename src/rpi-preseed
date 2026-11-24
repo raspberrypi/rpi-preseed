@@ -130,10 +130,16 @@ do_base() {
     apply_boot
 
     # A failed setting may be the device's only login, so the config keeps its
-    # secrets for another go.
+    # secrets for another go. An ordinary image gets a few: a setting that
+    # never works must not hold back runcmd, or reset a password every boot.
+    # An A/B image keeps trying, since a reboot there can change the outcome.
     if report_has_failed; then
-        log_error "some settings failed; config left unconsumed, to be retried at the next boot"
-        _base_fail retry; toml_cleanup; return 1
+        _db_n=$(( $(_failed_attempts) + 1 ))
+        if has_slot_state || [ "$_db_n" -lt "$RPI_PRESEED_BASE_ATTEMPTS" ]; then
+            log_error "some settings failed (attempt $_db_n); config left unconsumed, to be retried at the next boot"
+            _base_fail retry "$_db_n"; toml_cleanup; return 1
+        fi
+        log_error "some settings still fail after $_db_n attempts; giving up on them and consuming the config"
     fi
 
     # Before the config is consumed: a power cut after that must not find the
@@ -154,10 +160,19 @@ do_base() {
     return 0
 }
 
-# _base_fail [retry] — record a failed apply; "retry" has the next boot try again.
+# _failed_attempts — applies of this config that have already failed.
+_failed_attempts() {
+    _fa_n=
+    [ "$(stamp_fingerprint "$STAMP_FAILED")" = "$CONFIG_FINGERPRINT" ] &&
+        _fa_n=$(sed -n 's/^attempts=//p' "$STAMP_FAILED" | head -n1)
+    echo "${_fa_n:-0}"
+}
+
+# _base_fail [retry [ATTEMPTS]] — record a failed apply; "retry" has the next
+# boot try again.
 _base_fail() {
     write_stamp "$STAMP_FAILED"
-    [ "${1:-}" != retry ] || echo "retry=1" >>"$STAMP_FAILED"
+    [ "${1:-}" != retry ] || printf 'retry=1\nattempts=%s\n' "${2:-0}" >>"$STAMP_FAILED"
     report_write failed
     redact_cleanup 2>/dev/null || true
 }

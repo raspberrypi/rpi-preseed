@@ -8,6 +8,8 @@ rpi-preseed (0.2.2) trixie; urgency=medium
   * Report A/B /etc writes the slot-state manifest drops
   * Save an A/B image's /etc before consuming the config
   * Fail the apply when a setting fails, and retry it at the next boot
+  * Give up on a setting that fails three boots running, except on an
+    A/B image
   * Stop treating StaticPath= as kept, and write locale and timezone
     where an A/B image can keep them
 
