@@ -228,6 +228,10 @@ The config, unless the kernel command line or one of the above gives one.
 .TP
 .B /var/lib/rpi-preseed/
 Stamps (applied, early-runcmd-done, runcmd-done, apply-failed), logs, and report.json.
+An apply in which a setting fails leaves the config unconsumed and is tried
+again at the next boot. After three such attempts the config is consumed
+with the failures left in report.json, except on an rpi-image-gen A/B image,
+which keeps trying.
 .TP
 .B /etc/rpi-image-gen/slot-shared.d/rpi-preseed.conf
 On an rpi-image-gen A/B image, keeps

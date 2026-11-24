@@ -897,3 +897,59 @@ TOML
     assert_fail "timezone not half-written" "[ -e '$_re_r/etc/timezone' ]"
     rm -rf "$_re_r"
 }
+
+# A setting that never works is retried for a few boots, then given up on.
+t_retry_cap() {
+    _rc_r=$(mktemp -d)
+    mkdir -p "$_rc_r/etc" "$_rc_r/boot/firmware" "$_rc_r/home/pi"
+    printf 'root:x:0:0::/root:/bin/sh\npi:x:1000:1000:,,,:/home/pi:/bin/bash\n' >"$_rc_r/etc/passwd"
+    printf 'root:*:19000:0:99999:7:::\npi:!:19000:0:99999:7:::\n' >"$_rc_r/etc/shadow"
+    printf 'root:x:0:\npi:x:1000:\n' >"$_rc_r/etc/group"
+    printf 'root:*::\npi:!::\n' >"$_rc_r/etc/gshadow"
+    _rc_cfg="$_rc_r/boot/firmware/rpi-preseed.toml"
+    # A system account is refused every time.
+    cat >"$_rc_cfg" <<'TOML'
+config_version = "1.1"
+[system]
+hostname = "capped"
+[[users]]
+name = "root"
+password = "$5$salt$ROOTHASH"
+password_encrypted = true
+TOML
+    cp "$_rc_cfg" "$_rc_cfg.orig"
+    _rc_boot() {
+        env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$_rc_r" \
+            sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply-base >/dev/null 2>&1
+    }
+    _rc_st="$_rc_r/var/lib/rpi-preseed"
+
+    _rc_boot; _rc_boot
+    assert_contains "second failure counted" "$(cat "$_rc_st/apply-failed" 2>/dev/null)" "attempts=2"
+    assert_fail "still unconsumed after two" "[ -e '$_rc_st/applied' ]"
+    assert_contains "secrets kept while retrying" "$(cat "$_rc_cfg")" "ROOTHASH"
+    _rc_boot
+    assert_file "third failure consumes the config" "$_rc_st/applied"
+    assert_fail "no failed stamp left behind" "[ -e '$_rc_st/apply-failed' ]"
+    assert_ncontains "secrets redacted on giving up" "$(cat "$_rc_cfg")" "ROOTHASH"
+    assert_contains "the failure stays in the report" "$(cat "$_rc_st/report.json")" '"status": "failed"'
+    assert_eq "what worked was applied" "$(cat "$_rc_r/etc/hostname")" "capped"
+
+    # A changed config starts the count again.
+    rm -rf "$_rc_r/var/lib"; cp "$_rc_cfg.orig" "$_rc_cfg"
+    _rc_boot; _rc_boot
+    sed -i 's/capped/again/' "$_rc_cfg"
+    _rc_boot
+    assert_contains "new config counted from one" "$(cat "$_rc_st/apply-failed" 2>/dev/null)" "attempts=1"
+
+    # An A/B image is never given up on.
+    rm -rf "$_rc_r/var/lib"; cp "$_rc_cfg.orig" "$_rc_cfg"
+    mkdir -p "$_rc_r/usr/lib/rpi-image-gen"
+    for _rc_f in hostname hosts passwd shadow group gshadow; do
+        echo "EarlyPersistFile /etc/$_rc_f /persistent/common/etc/$_rc_f - -"
+    done >"$_rc_r/usr/lib/rpi-image-gen/slot-state.manifest"
+    _rc_boot; _rc_boot; _rc_boot; _rc_boot
+    assert_fail "A/B image still unconsumed after four" "[ -e '$_rc_st/applied' ]"
+    assert_contains "A/B image keeps its secrets" "$(cat "$_rc_cfg")" "ROOTHASH"
+    rm -rf "$_rc_r"
+}
