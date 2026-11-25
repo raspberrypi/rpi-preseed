@@ -757,12 +757,8 @@ t_slot_state() {
     printf 'pi:!::\nsudo:*::\n' >"$ROOT/etc/gshadow"
     printf '127.0.0.1\tlocalhost\n127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
     _ss_m="$ROOT/usr/lib/rpi-preseed/domains"
-    # As a build would: the paths file, cut down to what it kept.
-    _ss_decl() {
-        grep -E "^(system|user)\..* (/etc/(hostname|hosts|passwd|group|shadow|gshadow)|/home)\$" \
-            "$RPI_PRESEED_PATHS" >"$_ss_m"
-        [ $# -eq 0 ] || grep -E "^user\..* /etc/$1\$" "$RPI_PRESEED_PATHS" >>"$_ss_m"
-    }
+    # As rpi-image-gen's rpi-preseed-slotted layer keeps them.
+    _ss_decl() { printf '%s\n' system "$@" >"$_ss_m"; }
     CFG="$ROOT/boot/firmware/rpi-preseed.toml"
     cat >"$CFG" <<'TOML'
 config_version = "1.0"
@@ -783,7 +779,7 @@ TOML
             sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
     }
     cp "$CFG" "$CFG.orig"
-    _ss_decl
+    _ss_decl user.name user.password user.groups
     rpp
     _ss_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
     assert_eq "slot-state: kept hostname applied" "$(cat "$ROOT/etc/hostname" 2>/dev/null)" "rota"
@@ -797,13 +793,6 @@ TOML
     assert_contains "slot-state: unlisted sudoers skipped" "$_ss_rep" \
         '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not available on this image"'
     assert_fail "slot-state: unlisted sudoers not written" "[ -e '$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd' ]"
-
-    # Offered, but its file is not among those kept.
-    echo "user.passwordless_sudo file /etc/sudoers.d/other" >>"$_ss_m"
-    rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
-    rpp
-    assert_contains "slot-state: unkept sudoers skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
-        '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not persisted"'
 
     # The save runs before the config is consumed; if it fails, nothing is.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
@@ -826,26 +815,25 @@ TOML
     assert_fail "slot-state: failed save leaves no applied stamp" "[ -e '$ROOT/var/lib/rpi-preseed/applied' ]"
     assert_contains "slot-state: failed save keeps the secrets" "$(cat "$CFG")" "ALICEHASH"
 
-    # With the sudoers file declared, it lands.
+    # With the whole section listed, it lands.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
-    _ss_decl sudoers.d/010_rpi-preseed-nopasswd
+    _ss_decl user
     rpp
     assert_eq "slot-state: kept sudoers written" \
         "$(cat "$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd" 2>/dev/null)" "alice ALL=(ALL) NOPASSWD: ALL"
 
-    # Account files not kept, and no userdb: the account is not touched.
+    # Accounts not listed: the account is not touched.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
-    sed -i '/passwd\|shadow\|group/d' "$_ss_m"
-    assert_contains "slot-state: account still offered" "$(cat "$_ss_m")" "user.name"
+    _ss_decl
     sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd"
     rpp
-    assert_contains "slot-state: unkept accounts skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
-        '"key": "user.name", "status": "skipped", "detail": "not persisted"'
-    assert_contains "slot-state: unkept passwd untouched" "$(cat "$ROOT/etc/passwd")" "pi:x:1000:"
+    assert_contains "slot-state: unlisted accounts skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        '"key": "user.name", "status": "skipped", "detail": "not available on this image"'
+    assert_contains "slot-state: unlisted passwd untouched" "$(cat "$ROOT/etc/passwd")" "pi:x:1000:"
 
     # No UID 1000 account in the image: [user] makes one.
     rm -rf "$ROOT/var/lib" "$ROOT/home/alice"; cp "$CFG.orig" "$CFG"
-    _ss_decl
+    _ss_decl user
     echo "root:x:0:0::/root:/bin/sh" >"$ROOT/etc/passwd"
     echo "root:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
     printf 'root:x:0:\nsudo:x:27:\n' >"$ROOT/etc/group"
@@ -884,19 +872,36 @@ TOML
     assert_eq "localtime points at the zone" "$(readlink "$_re_r/etc/localtime")" \
         "/usr/share/zoneinfo/Europe/London"
 
-    # The link's target is what the image has to keep; localtime it cannot.
-    printf '%s\n' "locale.timezone file /etc/timezone" "locale.locales file /usr/lib/locale/locale-archive" \
-        "locale.lang file /etc/locale.conf" >"$_re_m"
+    # rpi-image-gen keeps one file of [locale]; a default follows its own key.
+    echo "locale.keymap" >"$_re_m"
     echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
     rm -rf "$_re_r/var/lib" "$_re_r/etc/localtime" "$_re_r/etc/timezone"
     _re_run
     _re_rep=$(cat "$_re_r/var/lib/rpi-preseed/report.json" 2>/dev/null)
-    assert_eq "kept locale.conf written" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
-    assert_contains "ungeneratable locales skipped" "$_re_rep" \
-        '"key": "locale.locales", "status": "skipped", "detail": "not persisted"'
-    assert_contains "unkept localtime skips the timezone" "$_re_rep" \
-        '"key": "locale.timezone", "status": "skipped", "detail": "not persisted"'
-    assert_fail "timezone not half-written" "[ -e '$_re_r/etc/timezone' ]"
+    _re_na='"status": "skipped", "detail": "not available on this image"'
+    assert_contains "unlisted locales skipped" "$_re_rep" "\"key\": \"locale.locales\", $_re_na"
+    assert_contains "unlisted timezone skipped" "$_re_rep" "\"key\": \"locale.timezone\", $_re_na"
+    assert_fail "timezone not written" "[ -e '$_re_r/etc/timezone' ]"
+    assert_eq "LANG left alone" "$(cat "$_re_r/etc/locale.conf")" "LANG=C.UTF-8"
+
+    # An image cannot generate a locale, but can select one it ships.
+    echo "locale.lang" >"$_re_m"
+    sed -i 's/^locales = .*/&\nlang = "en_GB.UTF-8"/' "$_re_r/boot/firmware/rpi-preseed.toml"
+    rm -rf "$_re_r/var/lib" "$_re_r/etc/locale.gen"
+    _re_run
+    assert_eq "listed LANG written" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
+    assert_fail "unlisted locale.gen not written" "[ -e '$_re_r/etc/locale.gen' ]"
+
+    # LANG taken from locale.locales is still locale.lang's write.
+    echo "locale.locales" >"$_re_m"
+    sed -i '/^lang = /d' "$_re_r/boot/firmware/rpi-preseed.toml"
+    echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
+    rm -rf "$_re_r/var/lib"
+    _re_run
+    assert_file "listed locale.gen written" "$_re_r/etc/locale.gen"
+    assert_eq "defaulted LANG not written" "$(cat "$_re_r/etc/locale.conf")" "LANG=C.UTF-8"
+    assert_contains "defaulted LANG reported" "$(cat "$_re_r/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        "\"key\": \"locale.lang\", $_re_na"
     rm -rf "$_re_r"
 }
 
@@ -1022,22 +1027,14 @@ TOML
     _av_run
     assert_contains "no list: everything applies" "$(cat "$_av_r/boot/firmware/cmdline.txt")" "regdom=GB"
 
-    # Path lines say which of a key's writes are kept, whichever key names them.
-    printf '%s\n' "wlan.ssid file /etc/a" "system dir /etc/d" "boot.config_txt boot config.txt" \
-        "ssh.authorized_keys home .ssh/authorized_keys" "packages" >"$_av_l"
+    # Anything but a single name is not an entry.
+    printf '%s\n' "system file /etc/hostname" "wlan.ssid" >"$_av_l"
     # shellcheck disable=SC2317  # called through assert_ok's eval
-    _av_p() { RPI_PRESEED_ROOT="$_av_r" persists "$@"; }
-    assert_ok "file kept" "_av_p wlan.ssid '$_av_r/etc/a'"
-    assert_fail "file is not a prefix" "_av_p wlan.ssid '$_av_r/etc/a/b'"
-    assert_ok "dir keeps what is under it" "_av_p system.hostname '$_av_r/etc/d/x'"
-    assert_fail "dir is not a name prefix" "_av_p system.hostname '$_av_r/etc/dd'"
-    assert_ok "kept for any offered key" "_av_p system.hostname '$_av_r/etc/a'"
-    assert_ok "boot path kept" "_av_p boot.config_txt '$_av_r/boot/firmware/config.txt'"
-    assert_ok "home path kept" "_av_p ssh.authorized_keys '$_av_r/home/pi/.ssh/authorized_keys'"
-    assert_fail "unlisted path not kept" "_av_p wlan.ssid '$_av_r/etc/other'"
-    assert_fail "unlisted key keeps nothing" "_av_p time.ntp '$_av_r/etc/a'"
-    assert_ok "bare entry keeps every write" "_av_p packages '$_av_r/anywhere'"
-    assert_ok "key offered through its section" "RPI_PRESEED_ROOT='$_av_r' available system.hostname"
-    assert_fail "sibling key not offered" "RPI_PRESEED_ROOT='$_av_r' available wlan.country"
+    _av_a() { RPI_PRESEED_ROOT="$_av_r" available "$1"; }
+    assert_fail "a line of several fields offers nothing" "_av_a system.hostname"
+    assert_ok "listed key offered" "_av_a wlan.ssid"
+    assert_fail "sibling key not offered" "_av_a wlan.country"
+    assert_ok "section report key offered through one of its keys" "_av_a wlan"
+    assert_fail "unlisted section not offered" "_av_a packages"
     rm -rf "$_av_r"
 }

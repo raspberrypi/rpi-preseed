@@ -28,8 +28,8 @@
 # and are marked "via". A key that only alters what another writes lists that
 # key's paths.
 #
-# An image that keeps some of these and not others says which in
-# /usr/lib/rpi-preseed/domains: see rpi-preseed(5).
+# An image that keeps some of these and not others names the keys it keeps
+# in full in /usr/lib/rpi-preseed/domains: see rpi-preseed(5).
 
 # The config is rewritten in place once applied, to remove its secrets.
 core                            dir     /var/lib/rpi-preseed
