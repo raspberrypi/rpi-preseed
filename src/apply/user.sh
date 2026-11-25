@@ -140,7 +140,7 @@ apply_users() {
 _select_users_backend() {
     if _accounts_writable; then
         USERS_BACKEND=passwd
-    elif writable_dir "$(target_path /etc/userdb)" && persists "$(target_path /etc/userdb)"; then
+    elif writable_dir "$(target_path /etc/userdb)"; then
         USERS_BACKEND=userdb
         if ! grep -Eq '^passwd:.*[[:space:]]systemd' "$(target_path /etc/nsswitch.conf)" 2>/dev/null; then
             log_error "users: /etc/passwd is read-only and NSS does not read userdb; install libnss-systemd"
@@ -149,21 +149,17 @@ _select_users_backend() {
         fi
     else
         USERS_BACKEND=none
-        log_warn "users: neither /etc/passwd nor /etc/userdb would keep an account; none added"
+        log_warn "users: neither /etc/passwd nor /etc/userdb can be written; none added"
         for _sub_k in "$@"; do report_key "$_sub_k" skipped "$ACCOUNTS_WHY"; done
     fi
     return 0
 }
 
-# _accounts_writable — can /etc/passwd and its siblings be changed for good?
-# If not, ACCOUNTS_WHY says why, as a report detail.
+# _accounts_writable — can /etc/passwd and its siblings be changed? If not,
+# ACCOUNTS_WHY says why, as a report detail.
 _accounts_writable() {
     ACCOUNTS_WHY="read-only filesystem"
-    writable_dir "$(target_path /etc)" || return 1
-    ACCOUNTS_WHY="not persisted"
-    for _acw_f in passwd shadow group gshadow; do
-        persists "$(target_path "/etc/$_acw_f")" || return 1
-    done
+    writable_dir "$(target_path /etc)"
 }
 
 # _apply_one_user PREFIX — apply the [[users]] entry whose keys start PREFIX.
@@ -305,7 +301,7 @@ _set_user_hash() {
 }
 
 # Every account's NOPASSWD rule, in one file: a fixed name is one an A/B image
-# can declare with EarlyPersistFile=.
+# can keep.
 SUDOERS_NOPASSWD=/etc/sudoers.d/010_rpi-preseed-nopasswd
 
 # _apply_user_sudo USER PREFIX — let USER sudo without a password.

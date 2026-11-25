@@ -14,6 +14,7 @@ echo "== upstream suite against ${LIBDIR}"
 if [ -x tests/run.sh ]; then
    RPI_PRESEED_SRCDIR="$LIBDIR" \
    RPI_PRESEED_SCHEMA=/usr/share/rpi-preseed/rpi-preseed.schema \
+   RPI_PRESEED_PATHS=/usr/share/rpi-preseed/paths \
       sh tests/run.sh || no "suite failed"
 else
    no "tests/run.sh not beside the test; nothing was exercised"
@@ -23,6 +24,7 @@ fi
 # It never looks at the files the Makefile installs by name one at a time.
 echo "== files the Makefile installs by name"
 for f in /usr/share/rpi-preseed/rpi-preseed.schema \
+         /usr/share/rpi-preseed/paths \
          /usr/share/man/man5/rpi-preseed.5.gz \
          /usr/share/doc/rpi-preseed/examples/rpi-preseed.toml \
          "${UNITDIR}/user@.service.d/10-rpi-preseed.conf"; do

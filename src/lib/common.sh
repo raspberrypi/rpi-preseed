@@ -291,48 +291,92 @@ writable_dir() {
     rm -f "$_wd_probe"
 }
 
-: "${SLOT_STATE_MANIFEST:=/usr/lib/rpi-image-gen/slot-state.manifest}"
+# What this image can keep, written by its build: one section or section.key
+# per line, as in the first column of /usr/share/rpi-preseed/paths. A name is
+# listed only if the image keeps everything it writes. Absent on an ordinary
+# image, where everything applies. Under /usr so that it is replaced with the
+# slot it describes, and cannot be edited or outlive it as a copy in /etc could.
+: "${RPI_PRESEED_DOMAINS:=/usr/lib/rpi-preseed/domains}"
+
+# has_available — does this image say what it can keep?
+has_available() {
+    [ -f "$(target_path "$RPI_PRESEED_DOMAINS")" ]
+}
+
+# awk: load(FILE) reads the list; offered(KEY) queries it. A [[users]] key
+# drops its index, and a password_encrypted flag goes with its password: on
+# its own the hash would be taken for a password.
+# shellcheck disable=SC2016  # awk source
+AVAILABLE_AWK='
+    function norm(k) {
+        sub(/^users\.[0-9]+\./, "users.", k); sub(/\.password_encrypted$/, ".password", k)
+        return k
+    }
+    function dom(k) { sub(/\..*/, "", k); return k }
+    function load(file,    line, f) {
+        while ((getline line < file) > 0) {
+            sub(/[[:space:]]*#.*/, "", line)
+            if (split(line, f, " ") == 1) listed[norm(f[1])] = 1
+        }
+    }
+    function offered(k,    e) {
+        k = norm(k)
+        if (k in listed || dom(k) in listed) return 1
+        # A report key naming a whole section, such as "packages".
+        if (k !~ /\./) for (e in listed) if (dom(e) == k) return 1
+        return 0
+    }'
+
+# available KEY — will this image keep what KEY writes? An rpi-image-gen A/B
+# image's /etc is writable but on tmpfs, and keeps only what its build
+# arranged. Every key, where there is no list.
+available() {
+    has_available || return 0
+    awk -v k="$1" "$AVAILABLE_AWK"'
+        BEGIN { load(ARGV[1]); exit !offered(k) }' "$(target_path "$RPI_PRESEED_DOMAINS")"
+}
+
+# drop_unavailable [quiet] — forget every parsed key this image does not
+# offer, reporting each skipped unless quiet. Top-level keys are not settings.
+drop_unavailable() {
+    has_available || return 0
+    _du_tmp=$(mktemp) || return 1
+    awk -F"$US" -v list="$(target_path "$RPI_PRESEED_DOMAINS")" -v out="$_du_tmp" "$AVAILABLE_AWK"'
+        BEGIN { load(list) }
+        $2 !~ /\./ || offered($2) { print > out; next }
+        !($2 in seen) { seen[$2] = 1; print $2 }' "$TOML_STORE" >"$_du_tmp.skipped"
+    cat "$_du_tmp" >"$TOML_STORE"
+    if [ -s "$_du_tmp.skipped" ] && [ "${1:-}" != quiet ]; then
+        while IFS= read -r _du_k; do
+            report_key "$_du_k" skipped "not available on this image"
+        done <"$_du_tmp.skipped"
+        log_warn "not applied, as $RPI_PRESEED_DOMAINS does not list them: $(tr '\n' ' ' <"$_du_tmp.skipped")"
+    fi
+    rm -f "$_du_tmp" "$_du_tmp.skipped"
+}
+
+# Saves an rpi-image-gen A/B image's /etc to its persistent partition.
+: "${SLOT_STATE_SAVE:=/usr/libexec/rpi-persist-files}"
 
 # has_slot_state — is this an rpi-image-gen A/B image?
 has_slot_state() {
-    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ]
+    [ -x "$SLOT_STATE_SAVE" ]
 }
 
 # Applies of one config before its failed settings are given up on.
 : "${RPI_PRESEED_BASE_ATTEMPTS:=3}"
 
-# persists PATH — would a write to target path PATH survive a reboot? An
-# rpi-image-gen A/B image's /etc is writable but on tmpfs: only what its
-# slot-state manifest declares is saved. StaticPath= does not count: the image
-# owns those and replaces them at every boot.
-persists() {
-    _ps_m=$(target_path "$SLOT_STATE_MANIFEST")
-    [ -f "$_ps_m" ] || return 0
-    _ps_p=${1#"$RPI_PRESEED_ROOT"}
-    case "$_ps_p" in /etc/*) ;; *) return 0 ;; esac
-    awk -v p="$_ps_p" '
-        $1 == "EarlyPersistFile" && $2 == p { f = 1 }
-        $1 == "SharedPath" && (p == $2 || index(p, $2 "/") == 1) { f = 1 }
-        END { exit !f }' "$_ps_m"
-}
-
-: "${SLOT_STATE_SAVE:=/usr/libexec/rpi-persist-files}"
-
-# save_persisted — copy the manifest's /etc files to persistent storage now.
-# The image does so itself, but only some time after a file changes.
+# save_persisted — save /etc now. The image does so itself, but only some
+# time after a file changes.
 save_persisted() {
-    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ] || return 0
+    has_slot_state || return 0
     # Without the overlay /etc holds the image's defaults, not to be saved.
     [ -n "$RPI_PRESEED_ROOT" ] || mountpoint -q /etc || return 0
-    if [ ! -x "$SLOT_STATE_SAVE" ]; then
-        log_warn "no $SLOT_STATE_SAVE; a power cut now could lose what was applied"
-        return 0
-    fi
     "$SLOT_STATE_SAVE"
 }
 
-# writable_or_skip KEY PATH — succeed if PATH can be written and will persist;
-# otherwise report KEY skipped. An immutable image mounts /boot/firmware
+# writable_or_skip KEY PATH — succeed if PATH can be written and the image
+# keeps what KEY writes; otherwise report KEY skipped. An immutable image mounts /boot/firmware
 # read-only.
 writable_or_skip() {
     _wos_d=$(dirname "$2")
@@ -342,9 +386,10 @@ writable_or_skip() {
         report_key "$1" skipped "read-only filesystem"
         return 1
     fi
-    persists "$2" && return 0
-    log_warn "$1: ${2#"$RPI_PRESEED_ROOT"} would be lost at reboot; the slot-state manifest does not keep it"
-    report_key "$1" skipped "not persisted"
+    # A key the config left to its default is not dropped with the others.
+    available "$1" && return 0
+    log_warn "$1: ${2#"$RPI_PRESEED_ROOT"} would be lost at reboot; this image does not keep it"
+    report_key "$1" skipped "not available on this image"
     return 1
 }
 

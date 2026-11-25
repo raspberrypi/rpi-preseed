@@ -6,7 +6,8 @@ REPO=$(cd -- "$(dirname -- "$0")/.." && pwd)
 # the source tree.
 : "${RPI_PRESEED_SRCDIR:=$REPO/src}"
 : "${RPI_PRESEED_SCHEMA:=$REPO/schema/rpi-preseed.schema}"
-export RPI_PRESEED_SRCDIR RPI_PRESEED_SCHEMA
+: "${RPI_PRESEED_PATHS:=$REPO/schema/paths}"
+export RPI_PRESEED_SRCDIR RPI_PRESEED_SCHEMA RPI_PRESEED_PATHS
 export RPI_PRESEED_BASEDIR="$RPI_PRESEED_SRCDIR"
 
 SCRATCH=$(mktemp -d)
@@ -51,6 +52,8 @@ assert_file()      { if [ -f "$2" ]; then ok "$1"; else no "$1 (no file: $2)"; f
 . "$REPO/tests/test_modes.sh"
 # shellcheck source=tests/test_integration.sh
 . "$REPO/tests/test_integration.sh"
+# shellcheck source=tests/test_paths.sh
+. "$REPO/tests/test_paths.sh"
 
 echo "== toml =="        ; t_toml
 echo "== validate =="    ; t_validate
@@ -65,6 +68,8 @@ echo "== integration ==" ; t_integration
 echo "== slot state ==" ; t_slot_state
 echo "== rota etc ==" ; t_rota_etc
 echo "== retry cap ==" ; t_retry_cap
+echo "== available ==" ; t_available
+echo "== paths ==" ; t_paths
 
 echo "-------------------------------------"
 printf '%d tests, %d failures\n' "$TESTS" "$FAILS"

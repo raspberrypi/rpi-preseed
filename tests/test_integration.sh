@@ -746,24 +746,19 @@ EOF
     fi
 }
 
-# An A/B image's /etc is a writable tmpfs overlay: only what its slot-state
-# manifest keeps survives a reboot, so nothing else may be reported applied.
+# An A/B image's /etc is a writable tmpfs overlay: only what its build says it
+# keeps survives a reboot, so nothing else may be reported applied.
 t_slot_state() {
     ROOT=$(mktemp -d)
-    mkdir -p "$ROOT/etc/sudoers.d" "$ROOT/boot/firmware" "$ROOT/home/pi" "$ROOT/usr/lib/rpi-image-gen"
+    mkdir -p "$ROOT/etc/sudoers.d" "$ROOT/usr/lib/rpi-preseed" "$ROOT/boot/firmware" "$ROOT/home/pi"
     echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
     echo "pi:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
     printf 'pi:x:1000:\nsudo:x:27:\n' >"$ROOT/etc/group"
     printf 'pi:!::\nsudo:*::\n' >"$ROOT/etc/gshadow"
     printf '127.0.0.1\tlocalhost\n127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
-    _ss_m="$ROOT/usr/lib/rpi-image-gen/slot-state.manifest"
-    _ss_decl() {
-        echo "# op path store seed bind" >"$_ss_m"
-        for _ss_f in hostname hosts passwd group shadow gshadow "$@"; do
-            echo "EarlyPersistFile /etc/$_ss_f /persistent/common/etc/$_ss_f - -" >>"$_ss_m"
-        done
-        echo "SharedPath /var/lib/rpi-preseed /persistent/shared/var/lib/rpi-preseed /usr/share/factory/var/lib/rpi-preseed optional" >>"$_ss_m"
-    }
+    _ss_m="$ROOT/usr/lib/rpi-preseed/domains"
+    # As rpi-image-gen's rpi-preseed-slotted layer keeps them.
+    _ss_decl() { printf '%s\n' system "$@" >"$_ss_m"; }
     CFG="$ROOT/boot/firmware/rpi-preseed.toml"
     cat >"$CFG" <<'TOML'
 config_version = "1.0"
@@ -784,19 +779,20 @@ TOML
             sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
     }
     cp "$CFG" "$CFG.orig"
-    _ss_decl
+    _ss_decl user.name user.password user.groups
     rpp
     _ss_rep=$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)
     assert_eq "slot-state: kept hostname applied" "$(cat "$ROOT/etc/hostname" 2>/dev/null)" "rota"
-    assert_contains "slot-state: unkept keymap skipped" "$_ss_rep" \
-        '"key": "locale.keymap", "status": "skipped", "detail": "not persisted"'
+    assert_contains "slot-state: unlisted keymap skipped" "$_ss_rep" \
+        '"key": "locale.keymap", "status": "skipped", "detail": "not available on this image"'
     assert_fail "slot-state: unkept keymap not written" "[ -e '$ROOT/etc/default/keyboard' ]"
     assert_contains "slot-state: rename reported" "$_ss_rep" '"key": "user.name", "status": "applied", "detail": "fallback"'
     assert_contains "slot-state: hash on the renamed account" "$(cat "$ROOT/etc/shadow")" "alice:\$y\$j9T\$salt\$ALICEHASH:"
     assert_contains "slot-state: group renamed" "$(cat "$ROOT/etc/group")" "alice:x:1000:"
     assert_contains "slot-state: home renamed" "$(cat "$ROOT/etc/passwd")" "alice:x:1000:1000:,,,:/home/alice:"
-    assert_contains "slot-state: unkept sudoers skipped" "$_ss_rep" \
-        '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not persisted"'
+    assert_contains "slot-state: unlisted sudoers skipped" "$_ss_rep" \
+        '"key": "user.passwordless_sudo", "status": "skipped", "detail": "not available on this image"'
+    assert_fail "slot-state: unlisted sudoers not written" "[ -e '$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd' ]"
 
     # The save runs before the config is consumed; if it fails, nothing is.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
@@ -819,25 +815,25 @@ TOML
     assert_fail "slot-state: failed save leaves no applied stamp" "[ -e '$ROOT/var/lib/rpi-preseed/applied' ]"
     assert_contains "slot-state: failed save keeps the secrets" "$(cat "$CFG")" "ALICEHASH"
 
-    # With the sudoers file declared, it lands.
+    # With the whole section listed, it lands.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
-    _ss_decl sudoers.d/010_rpi-preseed-nopasswd
+    _ss_decl user
     rpp
     assert_eq "slot-state: kept sudoers written" \
         "$(cat "$ROOT/etc/sudoers.d/010_rpi-preseed-nopasswd" 2>/dev/null)" "alice ALL=(ALL) NOPASSWD: ALL"
 
-    # Account files not kept, and no userdb: the account is not touched.
+    # Accounts not listed: the account is not touched.
     rm -rf "$ROOT/var/lib"; cp "$CFG.orig" "$CFG"
-    sed -i '/passwd\|shadow\|group/d' "$_ss_m"
+    _ss_decl
     sed -i 's/^alice:/pi:/' "$ROOT/etc/passwd"
     rpp
-    assert_contains "slot-state: unkept accounts skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
-        '"key": "user.name", "status": "skipped", "detail": "not persisted"'
-    assert_contains "slot-state: unkept passwd untouched" "$(cat "$ROOT/etc/passwd")" "pi:x:1000:"
+    assert_contains "slot-state: unlisted accounts skipped" "$(cat "$ROOT/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        '"key": "user.name", "status": "skipped", "detail": "not available on this image"'
+    assert_contains "slot-state: unlisted passwd untouched" "$(cat "$ROOT/etc/passwd")" "pi:x:1000:"
 
     # No UID 1000 account in the image: [user] makes one.
     rm -rf "$ROOT/var/lib" "$ROOT/home/alice"; cp "$CFG.orig" "$CFG"
-    _ss_decl
+    _ss_decl user
     echo "root:x:0:0::/root:/bin/sh" >"$ROOT/etc/passwd"
     echo "root:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
     printf 'root:x:0:\nsudo:x:27:\n' >"$ROOT/etc/group"
@@ -852,7 +848,7 @@ TOML
 # What an A/B image's /etc cannot do, from the review of the image-rota work.
 t_rota_etc() {
     _re_r=$(mktemp -d)
-    mkdir -p "$_re_r/etc/default" "$_re_r/boot/firmware" "$_re_r/usr/lib/rpi-image-gen" \
+    mkdir -p "$_re_r/etc/default" "$_re_r/usr/lib/rpi-preseed" "$_re_r/boot/firmware" \
         "$_re_r/usr/share/zoneinfo/Europe"
     : >"$_re_r/usr/share/zoneinfo/Europe/London"
     echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
@@ -863,38 +859,49 @@ config_version = "1.0"
 timezone = "Europe/London"
 locales = ["en_GB.UTF-8"]
 TOML
-    _re_m="$_re_r/usr/lib/rpi-image-gen/slot-state.manifest"
+    _re_m="$_re_r/usr/lib/rpi-preseed/domains"
     _re_run() {
         env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$_re_r" \
             sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
     }
 
-    # No manifest: an ordinary image.
+    # No list: an ordinary image.
     _re_run
     assert_ok "default locale is still a link" "[ -L '$_re_r/etc/default/locale' ]"
     assert_eq "LANG written through the link" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
     assert_eq "localtime points at the zone" "$(readlink "$_re_r/etc/localtime")" \
         "/usr/share/zoneinfo/Europe/London"
 
-    # An image that replaces a path at every boot does not keep it.
-    echo "StaticPath /etc/static /usr/share/factory/etc/static - -" >"$_re_m"
-    echo "SharedPath /etc/shared /persistent/shared/etc/shared - -" >>"$_re_m"
-    assert_fail "StaticPath is not kept" "RPI_PRESEED_ROOT='$_re_r' persists /etc/static/x"
-    assert_ok "SharedPath is kept" "RPI_PRESEED_ROOT='$_re_r' persists /etc/shared/x"
-
-    # The link's target is what the manifest has to name; localtime it cannot.
-    echo "EarlyPersistFile /etc/locale.conf /persistent/common/etc/locale.conf - -" >>"$_re_m"
-    echo "EarlyPersistFile /etc/timezone /persistent/common/etc/timezone - -" >>"$_re_m"
+    # rpi-image-gen keeps one file of [locale]; a default follows its own key.
+    echo "locale.keymap" >"$_re_m"
     echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
     rm -rf "$_re_r/var/lib" "$_re_r/etc/localtime" "$_re_r/etc/timezone"
     _re_run
     _re_rep=$(cat "$_re_r/var/lib/rpi-preseed/report.json" 2>/dev/null)
-    assert_eq "kept locale.conf written" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
-    assert_contains "ungeneratable locales skipped" "$_re_rep" \
-        '"key": "locale.locales", "status": "skipped", "detail": "not persisted"'
-    assert_contains "unkept localtime skips the timezone" "$_re_rep" \
-        '"key": "locale.timezone", "status": "skipped", "detail": "not persisted"'
-    assert_fail "timezone not half-written" "[ -e '$_re_r/etc/timezone' ]"
+    _re_na='"status": "skipped", "detail": "not available on this image"'
+    assert_contains "unlisted locales skipped" "$_re_rep" "\"key\": \"locale.locales\", $_re_na"
+    assert_contains "unlisted timezone skipped" "$_re_rep" "\"key\": \"locale.timezone\", $_re_na"
+    assert_fail "timezone not written" "[ -e '$_re_r/etc/timezone' ]"
+    assert_eq "LANG left alone" "$(cat "$_re_r/etc/locale.conf")" "LANG=C.UTF-8"
+
+    # An image cannot generate a locale, but can select one it ships.
+    echo "locale.lang" >"$_re_m"
+    sed -i 's/^locales = .*/&\nlang = "en_GB.UTF-8"/' "$_re_r/boot/firmware/rpi-preseed.toml"
+    rm -rf "$_re_r/var/lib" "$_re_r/etc/locale.gen"
+    _re_run
+    assert_eq "listed LANG written" "$(cat "$_re_r/etc/locale.conf")" "LANG=en_GB.UTF-8"
+    assert_fail "unlisted locale.gen not written" "[ -e '$_re_r/etc/locale.gen' ]"
+
+    # LANG taken from locale.locales is still locale.lang's write.
+    echo "locale.locales" >"$_re_m"
+    sed -i '/^lang = /d' "$_re_r/boot/firmware/rpi-preseed.toml"
+    echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
+    rm -rf "$_re_r/var/lib"
+    _re_run
+    assert_file "listed locale.gen written" "$_re_r/etc/locale.gen"
+    assert_eq "defaulted LANG not written" "$(cat "$_re_r/etc/locale.conf")" "LANG=C.UTF-8"
+    assert_contains "defaulted LANG reported" "$(cat "$_re_r/var/lib/rpi-preseed/report.json" 2>/dev/null)" \
+        "\"key\": \"locale.lang\", $_re_na"
     rm -rf "$_re_r"
 }
 
@@ -944,12 +951,90 @@ TOML
 
     # An A/B image is never given up on.
     rm -rf "$_rc_r/var/lib"; cp "$_rc_cfg.orig" "$_rc_cfg"
-    mkdir -p "$_rc_r/usr/lib/rpi-image-gen"
-    for _rc_f in hostname hosts passwd shadow group gshadow; do
-        echo "EarlyPersistFile /etc/$_rc_f /persistent/common/etc/$_rc_f - -"
-    done >"$_rc_r/usr/lib/rpi-image-gen/slot-state.manifest"
+    printf '#!/bin/sh\n' >"$_rc_r/save"; chmod +x "$_rc_r/save"
+    SLOT_STATE_SAVE="$_rc_r/save"; export SLOT_STATE_SAVE
     _rc_boot; _rc_boot; _rc_boot; _rc_boot
+    unset SLOT_STATE_SAVE
     assert_fail "A/B image still unconsumed after four" "[ -e '$_rc_st/applied' ]"
     assert_contains "A/B image keeps its secrets" "$(cat "$_rc_cfg")" "ROOTHASH"
     rm -rf "$_rc_r"
+}
+
+# The list an image's build leaves for it: what is not on it is not applied.
+t_available() {
+    _av_r=$(mktemp -d)
+    mkdir -p "$_av_r/etc" "$_av_r/usr/lib/rpi-preseed" "$_av_r/boot/firmware" "$_av_r/home/pi"
+    echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$_av_r/etc/passwd"
+    echo "pi:!:19000:0:99999:7:::" >"$_av_r/etc/shadow"
+    printf 'pi:x:1000:\n' >"$_av_r/etc/group"
+    echo "console=tty1" >"$_av_r/boot/firmware/cmdline.txt"
+    _av_l="$_av_r/usr/lib/rpi-preseed/domains"
+    _av_cfg="$_av_r/boot/firmware/rpi-preseed.toml"
+    cat >"$_av_cfg" <<'TOML'
+config_version = "1.1"
+debug = true
+[system]
+hostname = "listed"
+[wlan]
+ssid = "net"
+password = "$psk$HASH"
+password_encrypted = true
+country = "GB"
+[[users]]
+name = "bob"
+password = "$5$salt$BOBHASH"
+password_encrypted = true
+[runcmd]
+early = ["true"]
+TOML
+    cp "$_av_cfg" "$_av_cfg.orig"
+    _av_run() {
+        rm -rf "$_av_r/var/lib"; cp "$_av_cfg.orig" "$_av_cfg"
+        env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$_av_r" \
+            sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase "${1:-base}" >/dev/null 2>&1
+        _av_rep=$(cat "$_av_r/var/lib/rpi-preseed/report.json" 2>/dev/null)
+    }
+    _av_nm="$_av_r/etc/NetworkManager/system-connections/preconfigured.nmconnection"
+    _av_na='"status": "skipped", "detail": "not available on this image"'
+
+    # Keys beside a whole section; comments and blank lines.
+    printf '%s\n' "# from the build" "" "system   # the lot" "wlan.ssid" "wlan.password" "users.name" >"$_av_l"
+    _av_run
+    assert_eq "listed section applied" "$(cat "$_av_r/etc/hostname" 2>/dev/null)" "listed"
+    assert_contains "listed key applied" "$(cat "$_av_nm" 2>/dev/null)" "ssid=net"
+    assert_contains "encrypted flag follows its password" "$(cat "$_av_nm" 2>/dev/null)" "psk=\$psk\$HASH"
+    assert_contains "unlisted key skipped" "$_av_rep" "\"key\": \"wlan.country\", $_av_na"
+    assert_ncontains "unlisted key not written" "$(cat "$_av_r/boot/firmware/cmdline.txt")" "regdom"
+    assert_contains "[[users]] key listed without its index" "$(cat "$_av_r/etc/passwd")" "bob:x:1001:"
+    assert_contains "unlisted [[users]] key skipped" "$_av_rep" "\"key\": \"users.0.password\", $_av_na"
+    assert_ncontains "unlisted [[users]] key not applied" "$(cat "$_av_r/etc/shadow")" "BOBHASH"
+    assert_contains "unlisted section skipped" "$_av_rep" "\"key\": \"runcmd.early\", $_av_na"
+    assert_ncontains "top-level keys are not settings" "$_av_rep" '"key": "debug"'
+    assert_ncontains "unlisted secret still redacted" "$(cat "$_av_cfg")" "BOBHASH"
+    sed -i '/^bob:/d' "$_av_r/etc/passwd" "$_av_r/etc/shadow" "$_av_r/etc/group"; rm -rf "$_av_r/home/bob"
+
+    _av_run all
+    assert_ncontains "unlisted runcmd not run" "$_av_rep" '"phase": "early"'
+    assert_eq "runcmd skip reported once" "$(printf '%s\n' "$_av_rep" | grep -c '"key": "runcmd.early"')" "1"
+    sed -i '/^bob:/d' "$_av_r/etc/passwd" "$_av_r/etc/shadow" "$_av_r/etc/group"; rm -rf "$_av_r/home/bob"
+
+    # An empty list offers nothing; no list offers everything.
+    : >"$_av_l"; rm -f "$_av_r/etc/hostname"
+    _av_run
+    assert_fail "empty list applies nothing" "[ -e '$_av_r/etc/hostname' ]"
+    assert_file "empty list still consumes the config" "$_av_r/var/lib/rpi-preseed/applied"
+    rm -f "$_av_l"
+    _av_run
+    assert_contains "no list: everything applies" "$(cat "$_av_r/boot/firmware/cmdline.txt")" "regdom=GB"
+
+    # Anything but a single name is not an entry.
+    printf '%s\n' "system file /etc/hostname" "wlan.ssid" >"$_av_l"
+    # shellcheck disable=SC2317  # called through assert_ok's eval
+    _av_a() { RPI_PRESEED_ROOT="$_av_r" available "$1"; }
+    assert_fail "a line of several fields offers nothing" "_av_a system.hostname"
+    assert_ok "listed key offered" "_av_a wlan.ssid"
+    assert_fail "sibling key not offered" "_av_a wlan.country"
+    assert_ok "section report key offered through one of its keys" "_av_a wlan"
+    assert_fail "unlisted section not offered" "_av_a packages"
+    rm -rf "$_av_r"
 }

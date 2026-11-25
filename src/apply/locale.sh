@@ -27,7 +27,7 @@ apply_locale() {
         _al_did=1
     fi
 
-    if toml_present locale.locales; then
+    if toml_present locale.locales || toml_present locale.lang; then
         _apply_locales
         _al_did=1
     fi
@@ -123,7 +123,7 @@ _labwc_env_write() {
 # still select one it ships.
 _apply_locales() {
     _algen=$(target_path /etc/locale.gen)
-    if writable_or_skip locale.locales "$_algen"; then
+    if toml_present locale.locales && writable_or_skip locale.locales "$_algen"; then
         if [ -f "$_algen" ]; then
             toml_array locale.locales | while IFS= read -r _al_l; do
                 [ -n "$_al_l" ] || continue

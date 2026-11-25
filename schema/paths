@@ -1,0 +1,190 @@
+# rpi-preseed paths — what each configuration key writes.
+#
+# For an image whose root filesystem keeps only declared paths across a
+# reboot: a config is applied once, so a setting written anywhere else is
+# lost for good.
+#
+# Format (whitespace-separated columns):
+#   <domain>[.<key>]   <kind>   <path>
+#
+# domain: a top-level section of rpi-preseed.toml, or "core" for what every
+#         apply writes whichever sections are present.
+# key:    a key of that section. A line without one covers every key of the
+#         domain, so a reader that wants domains alone drops from the ".".
+# kind:
+#   file     a single file, by absolute path
+#   dir      a directory whose contents the key manages, by absolute path
+#   boot     a file or directory on the boot partition, relative to its mount
+#            point
+#   home     a file or directory under the home of the account concerned,
+#            relative to that home
+#   action   the key has effects no list of paths can declare; path is "-".
+#            May accompany other lines for the same key.
+#
+# A key lists every path it can write, across all of the ways it is applied:
+# directly, or through raspi-config, imager_custom and userconf-pi where the
+# image has them. Not every path exists on every image. Entries reached only
+# through a helper follow that helper as packaged in Raspberry Pi OS trixie,
+# and are marked "via". A key that only alters what another writes lists that
+# key's paths.
+#
+# An image that keeps some of these and not others names the keys it keeps
+# in full in /usr/lib/rpi-preseed/domains: see rpi-preseed(5).
+
+# The config is rewritten in place once applied, to remove its secrets.
+core                            dir     /var/lib/rpi-preseed
+core                            boot    rpi-preseed.toml
+core                            boot    rpi-preseed
+
+system.hostname                 file    /etc/hostname
+system.hostname                 file    /etc/hosts
+
+# Accounts live in the passwd family where it can be changed and kept, in
+# /etc/userdb otherwise. An image needs only one of the two.
+user.name                       file    /etc/passwd
+user.name                       file    /etc/shadow
+user.name                       file    /etc/group
+user.name                       file    /etc/gshadow
+user.name                       file    /etc/subuid
+user.name                       file    /etc/subgid
+user.name                       dir     /etc/userdb
+user.name                       dir     /home
+user.name                       file    /etc/sudoers.d/010_rpi-preseed-nopasswd
+user.name                       file    /etc/sudoers.d/010_pi-nopasswd
+# via userconf-pi (cancel-rename): autologin and the first-boot wizard.
+user.name                       file    /etc/lightdm/lightdm.conf
+user.name                       file    /etc/systemd/system/getty@tty1.service.d/autologin.conf
+user.name                       file    /etc/systemd/system/default.target
+user.name                       file    /etc/xdg/autostart/piwiz.desktop
+user.name                       dir     /var/lib/userconf-pi
+user.password                   file    /etc/shadow
+user.password                   dir     /etc/userdb
+user.password_encrypted         file    /etc/shadow
+user.password_encrypted         dir     /etc/userdb
+user.passwordless_sudo          file    /etc/sudoers.d/010_rpi-preseed-nopasswd
+user.groups                     file    /etc/group
+user.groups                     file    /etc/gshadow
+user.groups                     dir     /etc/userdb
+
+# [[users]] entries are not told apart: one line covers every key of each.
+users                           file    /etc/passwd
+users                           file    /etc/shadow
+users                           file    /etc/group
+users                           file    /etc/gshadow
+users                           file    /etc/subuid
+users                           file    /etc/subgid
+users                           dir     /etc/userdb
+users                           dir     /home
+users                           file    /etc/sudoers.d/010_rpi-preseed-nopasswd
+users                           home    .ssh/authorized_keys
+
+ssh.enabled                     boot    ssh
+# via imager_custom (enable_ssh), which also sets password authentication.
+ssh.enabled                     file    /etc/ssh/sshd_config
+ssh.enabled                     file    /etc/systemd/system/sshd.service
+ssh.enabled                     file    /etc/systemd/system/multi-user.target.wants/ssh.service
+ssh.password_authentication     file    /etc/ssh/sshd_config.d/rpi-preseed.conf
+ssh.password_authentication     file    /etc/ssh/sshd_config
+ssh.authorized_keys             home    .ssh/authorized_keys
+# via imager_custom (import_ssh_id).
+ssh.ssh_import_id               home    .ssh/authorized_keys
+ssh.ssh_import_id               file    /etc/systemd/system/import-ssh.service
+ssh.ssh_import_id               file    /etc/systemd/system/import-ssh.timer
+ssh.ssh_import_id               file    /etc/systemd/system/timers.target.wants/import-ssh.timer
+ssh.ssh_import_id               dir     /var/lib/raspberrypi-sys-mods
+
+wlan.ssid                       file    /etc/NetworkManager/system-connections/preconfigured.nmconnection
+wlan.ssid_hex                   file    /etc/NetworkManager/system-connections/preconfigured.nmconnection
+wlan.password                   file    /etc/NetworkManager/system-connections/preconfigured.nmconnection
+wlan.password_encrypted         file    /etc/NetworkManager/system-connections/preconfigured.nmconnection
+wlan.hidden                     file    /etc/NetworkManager/system-connections/preconfigured.nmconnection
+wlan.key_mgmt                   file    /etc/NetworkManager/system-connections/preconfigured.nmconnection
+wlan.country                    boot    cmdline.txt
+# via raspi-config (do_wifi_country): the radio is unblocked.
+wlan.country                    dir     /var/lib/systemd/rfkill
+wlan.country                    file    /var/lib/NetworkManager/NetworkManager.state
+
+ethernet.method                 file    /etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection
+ethernet.address                file    /etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection
+ethernet.gateway                file    /etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection
+ethernet.dns                    file    /etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection
+ethernet.dns_search             file    /etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection
+ethernet.interface              file    /etc/NetworkManager/system-connections/preconfigured-ethernet.nmconnection
+
+locale.timezone                 file    /etc/timezone
+locale.timezone                 file    /etc/localtime
+# /etc/console-setup and dconf are via raspi-config (do_configure_keyboard).
+locale.keymap                   file    /etc/default/keyboard
+locale.keymap                   file    /etc/xdg/labwc-greeter/environment
+locale.keymap                   file    /usr/share/labwc/environment
+locale.keymap                   home    .config/labwc/environment
+locale.keymap                   dir     /etc/console-setup
+locale.keymap                   file    /etc/dconf/profile/user
+locale.keymap                   file    /etc/dconf/db/local.d/00_keyboard
+locale.keymap_model             file    /etc/default/keyboard
+locale.keymap_model             file    /etc/xdg/labwc-greeter/environment
+locale.keymap_model             file    /usr/share/labwc/environment
+locale.keymap_model             home    .config/labwc/environment
+locale.keymap_model             dir     /etc/console-setup
+locale.keymap_model             file    /etc/dconf/profile/user
+locale.keymap_model             file    /etc/dconf/db/local.d/00_keyboard
+locale.keymap_variant           file    /etc/default/keyboard
+locale.keymap_variant           file    /etc/xdg/labwc-greeter/environment
+locale.keymap_variant           file    /usr/share/labwc/environment
+locale.keymap_variant           home    .config/labwc/environment
+locale.keymap_variant           dir     /etc/console-setup
+locale.keymap_variant           file    /etc/dconf/profile/user
+locale.keymap_variant           file    /etc/dconf/db/local.d/00_keyboard
+locale.keymap_options           file    /etc/default/keyboard
+locale.keymap_options           file    /etc/xdg/labwc-greeter/environment
+locale.keymap_options           file    /usr/share/labwc/environment
+locale.keymap_options           home    .config/labwc/environment
+locale.keymap_options           dir     /etc/console-setup
+locale.keymap_options           file    /etc/dconf/profile/user
+locale.keymap_options           file    /etc/dconf/db/local.d/00_keyboard
+locale.locales                  file    /etc/locale.gen
+locale.locales                  file    /usr/lib/locale/locale-archive
+# /etc/default/locale where it is a file, /etc/locale.conf where it is a link
+# to that. LANG defaults to the first of locale.locales.
+locale.lang                     file    /etc/default/locale
+locale.lang                     file    /etc/locale.conf
+locale.lc_time                  file    /etc/default/locale
+locale.lc_time                  file    /etc/locale.conf
+locale.lc_measurement           file    /etc/default/locale
+locale.lc_measurement           file    /etc/locale.conf
+
+time.ntp                        file    /etc/systemd/timesyncd.conf.d/10-rpi-preseed.conf
+time.fallback_ntp               file    /etc/systemd/timesyncd.conf.d/10-rpi-preseed.conf
+
+# update-ca-certificates rebuilds the trust store from the staged files.
+ca_certificates.files           dir     /usr/local/share/ca-certificates
+ca_certificates.files           dir     /etc/ssl/certs
+
+# The mount points named by the config are created too.
+mounts.fstab                    file    /etc/fstab
+mounts.fstab                    action  -
+
+connect.enabled                 home    .config/systemd/user
+connect.enabled                 dir     /var/lib/systemd/linger
+connect.mode                    home    .config/com.raspberrypi.connect
+connect.token                   home    .config/com.raspberrypi.connect
+
+# /etc is via raspi-config (do_i2c, do_spi).
+interfaces.i2c                  boot    config.txt
+interfaces.i2c                  file    /etc/modules
+interfaces.i2c                  file    /etc/modprobe.d/raspi-blacklist.conf
+interfaces.spi                  boot    config.txt
+interfaces.spi                  file    /etc/modprobe.d/raspi-blacklist.conf
+interfaces.onewire              boot    config.txt
+# Validated and reported, but not yet written anywhere.
+interfaces.serial               boot    config.txt
+interfaces.serial               boot    cmdline.txt
+# Hands over to rpi-usb-gadget.
+interfaces.usb_gadget           action  -
+
+boot.config_txt                 boot    config.txt
+boot.cmdline_txt                boot    cmdline.txt
+
+packages                        action  -
+
+runcmd                          action  -
