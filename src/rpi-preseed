@@ -114,6 +114,8 @@ do_base() {
     if ! validate_config; then
         log_error "configuration invalid; refusing to apply"; _base_fail; toml_cleanup; return 1
     fi
+    # After validation, which judges the config as written.
+    drop_unavailable
 
     apply_system
     apply_user
@@ -211,6 +213,7 @@ do_runcmd() {
     log_init "runcmd-$_dr_phase"
     toml_parse "$_dr_cfg" || { log_error "failed to parse config"; return 1; }
     redact_init
+    drop_unavailable quiet   # reported by the base phase
     RUNCMD_OUT="$LOG_DIR/runcmd-$_dr_phase.out"; export RUNCMD_OUT
     : >"$RUNCMD_OUT" 2>/dev/null || true
 
@@ -281,6 +284,7 @@ cmd_status() {
         fi
     done
     [ -f "$STATE_DIR/report.json" ] && printf 'report:      %s\n' "$STATE_DIR/report.json"
+    has_available && printf 'available:   %s\n' "$(target_path "$RPI_PRESEED_AVAILABLE")"
     return 0
 }
 

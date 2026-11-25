@@ -291,43 +291,114 @@ writable_dir() {
     rm -f "$_wd_probe"
 }
 
-: "${SLOT_STATE_MANIFEST:=/usr/lib/rpi-image-gen/slot-state.manifest}"
+# What this image can keep, written by its build: one entry per line, either
+#   <domain>[.<key>]                    every write of the key is kept
+#   <domain>[.<key>]  <kind>  <path>    the key is offered, this path is kept
+# with kinds and paths as in /usr/share/rpi-preseed/paths, of which a filtered
+# copy is a valid list. Absent on an ordinary image, where everything applies.
+: "${RPI_PRESEED_AVAILABLE:=/etc/rpi-preseed/available}"
+
+# has_available — does this image say what it can keep?
+has_available() {
+    [ -f "$(target_path "$RPI_PRESEED_AVAILABLE")" ]
+}
+
+# awk: load(FILE) reads the list; offered(KEY) and kept(KEY, PATH) query it.
+# A [[users]] key drops its index, and a password_encrypted flag goes with
+# its password: on its own the hash would be taken for a password.
+# shellcheck disable=SC2016  # awk source
+AVAILABLE_AWK='
+    function norm(k) {
+        sub(/^users\.[0-9]+\./, "users.", k); sub(/\.password_encrypted$/, ".password", k)
+        return k
+    }
+    function dom(k) { sub(/\..*/, "", k); return k }
+    function under(p, e) { return p == e || index(p, e "/") == 1 }
+    function load(file,    line, f, n) {
+        while ((getline line < file) > 0) {
+            sub(/[[:space:]]*#.*/, "", line)
+            n = split(line, f, " ")
+            if (n != 1 && n != 3) continue
+            ent[++ents] = norm(f[1]); kind[ents] = (n == 3 ? f[2] : ""); path[ents] = f[3]
+        }
+    }
+    function offered(k,    i, whole) {
+        k = norm(k); whole = 0
+        for (i = 1; i <= ents; i++) {
+            if (ent[i] != k && ent[i] != dom(k) && !(k !~ /\./ && dom(ent[i]) == k)) continue
+            if (kind[i] == "") whole = 1
+            if (!whole) whole = -1
+        }
+        return whole
+    }
+    function kept(k, p,    i, o, rel) {
+        o = offered(k)
+        if (o >= 0) return o
+        for (i = 1; i <= ents; i++) {
+            if (kind[i] == "file" && p == path[i]) return 1
+            if (kind[i] == "dir" && under(p, path[i])) return 1
+            if (kind[i] == "boot") {
+                rel = p
+                if (sub(/^\/boot\/(firmware\/)?/, "", rel) && under(rel, path[i])) return 1
+            }
+            if (kind[i] == "home" && (rel = index(p, "/" path[i])) &&
+                substr(p, rel + length(path[i]) + 1) ~ /^(\/|$)/) return 1
+        }
+        return 0
+    }'
+
+# available KEY — does this image offer KEY? Every key, where it has no list.
+available() {
+    has_available || return 0
+    awk -v k="$1" "$AVAILABLE_AWK"'
+        BEGIN { load(ARGV[1]); exit !offered(k) }' "$(target_path "$RPI_PRESEED_AVAILABLE")"
+}
+
+# persists KEY PATH — would KEY's write to target path PATH survive a reboot?
+# An rpi-image-gen A/B image's /etc is writable but on tmpfs, and keeps only
+# what its build arranged.
+persists() {
+    has_available || return 0
+    awk -v k="$1" -v p="${2#"$RPI_PRESEED_ROOT"}" "$AVAILABLE_AWK"'
+        BEGIN { load(ARGV[1]); exit !kept(k, p) }' "$(target_path "$RPI_PRESEED_AVAILABLE")"
+}
+
+# drop_unavailable [quiet] — forget every parsed key this image does not
+# offer, reporting each skipped unless quiet. Top-level keys are not settings.
+drop_unavailable() {
+    has_available || return 0
+    _du_tmp=$(mktemp) || return 1
+    awk -F"$US" -v list="$(target_path "$RPI_PRESEED_AVAILABLE")" -v out="$_du_tmp" "$AVAILABLE_AWK"'
+        BEGIN { load(list) }
+        $2 !~ /\./ || offered($2) { print > out; next }
+        !($2 in seen) { seen[$2] = 1; print $2 }' "$TOML_STORE" >"$_du_tmp.skipped"
+    cat "$_du_tmp" >"$TOML_STORE"
+    if [ -s "$_du_tmp.skipped" ] && [ "${1:-}" != quiet ]; then
+        while IFS= read -r _du_k; do
+            report_key "$_du_k" skipped "not available on this image"
+        done <"$_du_tmp.skipped"
+        log_warn "not applied, as $RPI_PRESEED_AVAILABLE does not list them: $(tr '\n' ' ' <"$_du_tmp.skipped")"
+    fi
+    rm -f "$_du_tmp" "$_du_tmp.skipped"
+}
+
+# Saves an rpi-image-gen A/B image's /etc to its persistent partition.
+: "${SLOT_STATE_SAVE:=/usr/libexec/rpi-persist-files}"
 
 # has_slot_state — is this an rpi-image-gen A/B image?
 has_slot_state() {
-    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ]
+    [ -x "$SLOT_STATE_SAVE" ]
 }
 
 # Applies of one config before its failed settings are given up on.
 : "${RPI_PRESEED_BASE_ATTEMPTS:=3}"
 
-# persists PATH — would a write to target path PATH survive a reboot? An
-# rpi-image-gen A/B image's /etc is writable but on tmpfs: only what its
-# slot-state manifest declares is saved. StaticPath= does not count: the image
-# owns those and replaces them at every boot.
-persists() {
-    _ps_m=$(target_path "$SLOT_STATE_MANIFEST")
-    [ -f "$_ps_m" ] || return 0
-    _ps_p=${1#"$RPI_PRESEED_ROOT"}
-    case "$_ps_p" in /etc/*) ;; *) return 0 ;; esac
-    awk -v p="$_ps_p" '
-        $1 == "EarlyPersistFile" && $2 == p { f = 1 }
-        $1 == "SharedPath" && (p == $2 || index(p, $2 "/") == 1) { f = 1 }
-        END { exit !f }' "$_ps_m"
-}
-
-: "${SLOT_STATE_SAVE:=/usr/libexec/rpi-persist-files}"
-
-# save_persisted — copy the manifest's /etc files to persistent storage now.
-# The image does so itself, but only some time after a file changes.
+# save_persisted — save /etc now. The image does so itself, but only some
+# time after a file changes.
 save_persisted() {
-    [ -f "$(target_path "$SLOT_STATE_MANIFEST")" ] || return 0
+    has_slot_state || return 0
     # Without the overlay /etc holds the image's defaults, not to be saved.
     [ -n "$RPI_PRESEED_ROOT" ] || mountpoint -q /etc || return 0
-    if [ ! -x "$SLOT_STATE_SAVE" ]; then
-        log_warn "no $SLOT_STATE_SAVE; a power cut now could lose what was applied"
-        return 0
-    fi
     "$SLOT_STATE_SAVE"
 }
 
@@ -342,8 +413,8 @@ writable_or_skip() {
         report_key "$1" skipped "read-only filesystem"
         return 1
     fi
-    persists "$2" && return 0
-    log_warn "$1: ${2#"$RPI_PRESEED_ROOT"} would be lost at reboot; the slot-state manifest does not keep it"
+    persists "$1" "$2" && return 0
+    log_warn "$1: ${2#"$RPI_PRESEED_ROOT"} would be lost at reboot; this image does not keep it"
     report_key "$1" skipped "not persisted"
     return 1
 }

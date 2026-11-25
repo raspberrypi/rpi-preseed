@@ -20,7 +20,11 @@ apply_packages() {
         return 0
     fi
     # An immutable image cannot take packages, and is not meant to.
-    writable_or_skip packages "$(target_path /usr/bin)/apt-get" || return 0
+    if ! writable_dir "$(target_path /usr/bin)"; then
+        log_warn "packages: /usr is read-only; not applied"
+        report_key packages skipped "read-only filesystem"
+        return 0
+    fi
 
     _ap_retries=$(toml_get_default runcmd.late_retries 3)
     _ap_delay=$(toml_get_default runcmd.late_retry_delay 5)

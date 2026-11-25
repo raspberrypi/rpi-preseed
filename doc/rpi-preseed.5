@@ -241,13 +241,63 @@ and
 on the persistent partition, shared by both slots.
 .TP
 .B /usr/share/rpi-preseed/paths
-Every path each section can write, one
-.I domain kind path
-line each, for an image build that must declare what survives a reboot. The
-file's header describes the kinds.
+Every path each key can write, one
+.I domain[.key] kind path
+line each, for an image build that must arrange what survives a reboot. A
+line without a key covers every key of its section. The file's header
+describes the kinds.
+.TP
+.B /etc/rpi-preseed/available
+Written by an image's build, not by rpi-preseed: what this image can keep.
+Absent on an ordinary image, where everything applies. See
+.BR "AVAILABILITY LIST" .
 .TP
 .B /boot/firmware/rpi-preseed/
 Redacted status breadcrumb and collect-logs bundles.
+.SH AVAILABILITY LIST
+An image that keeps only some paths across a reboot lists what it can keep
+in
+.IR /etc/rpi-preseed/available .
+A config is applied once, so where the list exists a key not on it is not
+applied, whatever the config says, and is reported skipped as not available
+on this image. Top-level keys are unaffected.
+.PP
+Each line is one entry, in either form;
+.B #
+starts a comment:
+.PP
+.RS
+.nf
+.I domain[.key]
+.I domain[.key] kind path
+.fi
+.RE
+.PP
+The first offers the key, or every key of the section, and says all of its
+writes are kept. The second offers it and says that
+.I path
+is kept, with kinds and paths as in
+.IR /usr/share/rpi-preseed/paths ,
+so that file cut down to the lines an image keeps is a valid list. A key
+offered only by path lines is applied where its destination is among the
+paths kept, by any line, and is otherwise reported skipped as not persisted.
+Path lines are how a build says which of two homes an account has:
+.I /etc/passwd
+and its siblings, or
+.IR /etc/userdb .
+.PP
+A key of
+.B [[users]]
+is written without its index, as
+.BR users.name .
+A
+.B password_encrypted
+flag is offered with its password and need not be listed. Other keys that
+work together, such as
+.B wlan.ssid
+and
+.BR wlan.password ,
+are each applied only if listed.
 .SH SEE ALSO
 .BR rpi-preseed (8)
 .SH NOTES
@@ -257,13 +307,10 @@ On an immutable image, a setting whose destination is read-only is reported
 skipped, not applied; one written to a directory the image shares from
 writable storage still applies. On an rpi-image-gen A/B image,
 .I /etc
-is writable but kept only where
-.I /usr/lib/rpi-image-gen/slot-state.manifest
-says, so a setting written anywhere else in it is reported skipped as not
-persisted. Passwordless sudo goes to
+is writable but kept only where the build arranged, which it records in the
+availability list. Passwordless sudo goes to
 .IR /etc/sudoers.d/010_rpi-preseed-nopasswd ,
-which such an image keeps with
-.BR EarlyPersistFile= .
+a fixed name such an image can keep.
 .PP
 If any setting fails, the apply fails: the config keeps its secrets and is
 tried again at each boot until it applies. A config that does not parse or

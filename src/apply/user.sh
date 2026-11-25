@@ -21,7 +21,7 @@ apply_user() {
     # An immutable image's UID 1000 account lives in its read-only /etc/passwd
     # and cannot be renamed, so the named account is made in userdb instead.
     # This is what lets an unchanged Imager configure such an image.
-    if ! _accounts_writable; then
+    if ! _accounts_writable user.name; then
         if toml_present user.name && _select_users_backend user.name && \
            [ "$USERS_BACKEND" = userdb ]; then
             _apply_one_user user || return 1
@@ -138,9 +138,9 @@ apply_users() {
 # accounts as drop-in records instead, from a directory it can share. KEYs are
 # reported when no account can be made.
 _select_users_backend() {
-    if _accounts_writable; then
+    if _accounts_writable "$1"; then
         USERS_BACKEND=passwd
-    elif writable_dir "$(target_path /etc/userdb)" && persists "$(target_path /etc/userdb)"; then
+    elif writable_dir "$(target_path /etc/userdb)" && persists "$1" "$(target_path /etc/userdb)"; then
         USERS_BACKEND=userdb
         if ! grep -Eq '^passwd:.*[[:space:]]systemd' "$(target_path /etc/nsswitch.conf)" 2>/dev/null; then
             log_error "users: /etc/passwd is read-only and NSS does not read userdb; install libnss-systemd"
@@ -155,14 +155,14 @@ _select_users_backend() {
     return 0
 }
 
-# _accounts_writable — can /etc/passwd and its siblings be changed for good?
-# If not, ACCOUNTS_WHY says why, as a report detail.
+# _accounts_writable KEY — can /etc/passwd and its siblings be changed for
+# good, for KEY? If not, ACCOUNTS_WHY says why, as a report detail.
 _accounts_writable() {
     ACCOUNTS_WHY="read-only filesystem"
     writable_dir "$(target_path /etc)" || return 1
     ACCOUNTS_WHY="not persisted"
     for _acw_f in passwd shadow group gshadow; do
-        persists "$(target_path "/etc/$_acw_f")" || return 1
+        persists "$1" "$(target_path "/etc/$_acw_f")" || return 1
     done
 }
 
@@ -305,7 +305,7 @@ _set_user_hash() {
 }
 
 # Every account's NOPASSWD rule, in one file: a fixed name is one an A/B image
-# can declare with EarlyPersistFile=.
+# can keep.
 SUDOERS_NOPASSWD=/etc/sudoers.d/010_rpi-preseed-nopasswd
 
 # _apply_user_sudo USER PREFIX — let USER sudo without a password.

@@ -68,6 +68,7 @@ echo "== integration ==" ; t_integration
 echo "== slot state ==" ; t_slot_state
 echo "== rota etc ==" ; t_rota_etc
 echo "== retry cap ==" ; t_retry_cap
+echo "== available ==" ; t_available
 echo "== paths ==" ; t_paths
 
 echo "-------------------------------------"
