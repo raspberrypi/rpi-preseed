@@ -29,7 +29,7 @@
 # key's paths.
 #
 # An image that keeps some of these and not others says which in
-# /etc/rpi-preseed/available: see rpi-preseed(5).
+# /usr/lib/rpi-preseed/domains: see rpi-preseed(5).
 
 # The config is rewritten in place once applied, to remove its secrets.
 core                            dir     /var/lib/rpi-preseed

@@ -284,7 +284,7 @@ cmd_status() {
         fi
     done
     [ -f "$STATE_DIR/report.json" ] && printf 'report:      %s\n' "$STATE_DIR/report.json"
-    has_available && printf 'available:   %s\n' "$(target_path "$RPI_PRESEED_AVAILABLE")"
+    has_available && printf 'available:   %s\n' "$(target_path "$RPI_PRESEED_DOMAINS")"
     return 0
 }
 

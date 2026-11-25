@@ -247,7 +247,7 @@ line each, for an image build that must arrange what survives a reboot. A
 line without a key covers every key of its section. The file's header
 describes the kinds.
 .TP
-.B /etc/rpi-preseed/available
+.B /usr/lib/rpi-preseed/domains
 Written by an image's build, not by rpi-preseed: what this image can keep.
 Absent on an ordinary image, where everything applies. See
 .BR "AVAILABILITY LIST" .
@@ -257,7 +257,7 @@ Redacted status breadcrumb and collect-logs bundles.
 .SH AVAILABILITY LIST
 An image that keeps only some paths across a reboot lists what it can keep
 in
-.IR /etc/rpi-preseed/available .
+.IR /usr/lib/rpi-preseed/domains .
 A config is applied once, so where the list exists a key not on it is not
 applied, whatever the config says, and is reported skipped as not available
 on this image. Top-level keys are unaffected.

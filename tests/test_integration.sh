@@ -750,13 +750,13 @@ EOF
 # keeps survives a reboot, so nothing else may be reported applied.
 t_slot_state() {
     ROOT=$(mktemp -d)
-    mkdir -p "$ROOT/etc/sudoers.d" "$ROOT/etc/rpi-preseed" "$ROOT/boot/firmware" "$ROOT/home/pi"
+    mkdir -p "$ROOT/etc/sudoers.d" "$ROOT/usr/lib/rpi-preseed" "$ROOT/boot/firmware" "$ROOT/home/pi"
     echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$ROOT/etc/passwd"
     echo "pi:*:19000:0:99999:7:::" >"$ROOT/etc/shadow"
     printf 'pi:x:1000:\nsudo:x:27:\n' >"$ROOT/etc/group"
     printf 'pi:!::\nsudo:*::\n' >"$ROOT/etc/gshadow"
     printf '127.0.0.1\tlocalhost\n127.0.1.1\traspberrypi\n' >"$ROOT/etc/hosts"
-    _ss_m="$ROOT/etc/rpi-preseed/available"
+    _ss_m="$ROOT/usr/lib/rpi-preseed/domains"
     # As a build would: the paths file, cut down to what it kept.
     _ss_decl() {
         grep -E "^(system|user)\..* (/etc/(hostname|hosts|passwd|group|shadow|gshadow)|/home)\$" \
@@ -860,7 +860,7 @@ TOML
 # What an A/B image's /etc cannot do, from the review of the image-rota work.
 t_rota_etc() {
     _re_r=$(mktemp -d)
-    mkdir -p "$_re_r/etc/default" "$_re_r/etc/rpi-preseed" "$_re_r/boot/firmware" \
+    mkdir -p "$_re_r/etc/default" "$_re_r/usr/lib/rpi-preseed" "$_re_r/boot/firmware" \
         "$_re_r/usr/share/zoneinfo/Europe"
     : >"$_re_r/usr/share/zoneinfo/Europe/London"
     echo "LANG=C.UTF-8" >"$_re_r/etc/locale.conf"
@@ -871,7 +871,7 @@ config_version = "1.0"
 timezone = "Europe/London"
 locales = ["en_GB.UTF-8"]
 TOML
-    _re_m="$_re_r/etc/rpi-preseed/available"
+    _re_m="$_re_r/usr/lib/rpi-preseed/domains"
     _re_run() {
         env -u RPI_PRESEED_STATE_DIR -u RPI_PRESEED_BOOT_DIR RPI_PRESEED_ROOT="$_re_r" \
             sh "$RPI_PRESEED_SRCDIR/rpi-preseed" apply --phase base >/dev/null 2>&1
@@ -958,12 +958,12 @@ TOML
 # The list an image's build leaves for it: what is not on it is not applied.
 t_available() {
     _av_r=$(mktemp -d)
-    mkdir -p "$_av_r/etc/rpi-preseed" "$_av_r/boot/firmware" "$_av_r/home/pi"
+    mkdir -p "$_av_r/etc" "$_av_r/usr/lib/rpi-preseed" "$_av_r/boot/firmware" "$_av_r/home/pi"
     echo "pi:x:1000:1000:,,,:/home/pi:/bin/bash" >"$_av_r/etc/passwd"
     echo "pi:!:19000:0:99999:7:::" >"$_av_r/etc/shadow"
     printf 'pi:x:1000:\n' >"$_av_r/etc/group"
     echo "console=tty1" >"$_av_r/boot/firmware/cmdline.txt"
-    _av_l="$_av_r/etc/rpi-preseed/available"
+    _av_l="$_av_r/usr/lib/rpi-preseed/domains"
     _av_cfg="$_av_r/boot/firmware/rpi-preseed.toml"
     cat >"$_av_cfg" <<'TOML'
 config_version = "1.1"

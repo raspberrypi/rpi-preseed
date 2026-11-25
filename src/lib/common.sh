@@ -296,11 +296,13 @@ writable_dir() {
 #   <domain>[.<key>]  <kind>  <path>    the key is offered, this path is kept
 # with kinds and paths as in /usr/share/rpi-preseed/paths, of which a filtered
 # copy is a valid list. Absent on an ordinary image, where everything applies.
-: "${RPI_PRESEED_AVAILABLE:=/etc/rpi-preseed/available}"
+# Under /usr so that it is replaced with the slot it describes, and cannot be
+# edited or outlive it as a copy in /etc could.
+: "${RPI_PRESEED_DOMAINS:=/usr/lib/rpi-preseed/domains}"
 
 # has_available — does this image say what it can keep?
 has_available() {
-    [ -f "$(target_path "$RPI_PRESEED_AVAILABLE")" ]
+    [ -f "$(target_path "$RPI_PRESEED_DOMAINS")" ]
 }
 
 # awk: load(FILE) reads the list; offered(KEY) and kept(KEY, PATH) query it.
@@ -351,7 +353,7 @@ AVAILABLE_AWK='
 available() {
     has_available || return 0
     awk -v k="$1" "$AVAILABLE_AWK"'
-        BEGIN { load(ARGV[1]); exit !offered(k) }' "$(target_path "$RPI_PRESEED_AVAILABLE")"
+        BEGIN { load(ARGV[1]); exit !offered(k) }' "$(target_path "$RPI_PRESEED_DOMAINS")"
 }
 
 # persists KEY PATH — would KEY's write to target path PATH survive a reboot?
@@ -360,7 +362,7 @@ available() {
 persists() {
     has_available || return 0
     awk -v k="$1" -v p="${2#"$RPI_PRESEED_ROOT"}" "$AVAILABLE_AWK"'
-        BEGIN { load(ARGV[1]); exit !kept(k, p) }' "$(target_path "$RPI_PRESEED_AVAILABLE")"
+        BEGIN { load(ARGV[1]); exit !kept(k, p) }' "$(target_path "$RPI_PRESEED_DOMAINS")"
 }
 
 # drop_unavailable [quiet] — forget every parsed key this image does not
@@ -368,7 +370,7 @@ persists() {
 drop_unavailable() {
     has_available || return 0
     _du_tmp=$(mktemp) || return 1
-    awk -F"$US" -v list="$(target_path "$RPI_PRESEED_AVAILABLE")" -v out="$_du_tmp" "$AVAILABLE_AWK"'
+    awk -F"$US" -v list="$(target_path "$RPI_PRESEED_DOMAINS")" -v out="$_du_tmp" "$AVAILABLE_AWK"'
         BEGIN { load(list) }
         $2 !~ /\./ || offered($2) { print > out; next }
         !($2 in seen) { seen[$2] = 1; print $2 }' "$TOML_STORE" >"$_du_tmp.skipped"
@@ -377,7 +379,7 @@ drop_unavailable() {
         while IFS= read -r _du_k; do
             report_key "$_du_k" skipped "not available on this image"
         done <"$_du_tmp.skipped"
-        log_warn "not applied, as $RPI_PRESEED_AVAILABLE does not list them: $(tr '\n' ' ' <"$_du_tmp.skipped")"
+        log_warn "not applied, as $RPI_PRESEED_DOMAINS does not list them: $(tr '\n' ' ' <"$_du_tmp.skipped")"
     fi
     rm -f "$_du_tmp" "$_du_tmp.skipped"
 }

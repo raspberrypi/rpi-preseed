@@ -13,7 +13,7 @@ rpi-preseed (0.2.2) trixie; urgency=medium
   * Stop treating StaticPath= as kept, and write locale and timezone
     where an A/B image can keep them
   * Declare the paths each configuration key writes
-  * Apply only what /etc/rpi-preseed/available lists, where an image has
+  * Apply only what /usr/lib/rpi-preseed/domains lists, where an image has
     one, in place of reading the slot-state manifest
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 12 Nov 2026 15:32:26 +0000
