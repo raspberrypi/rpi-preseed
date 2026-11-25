@@ -3,9 +3,10 @@
 #
 # An image build persists what the file lists and nothing else, so a write the
 # file omits is a setting lost at the first reboot, and nothing on the device
-# says so. Three checks hold the two together: the file parses, every literal
-# path an applier names is declared for its domain, and nothing a full apply
-# changes in a sandbox falls outside the list.
+# says so. Four checks hold the two together: the file parses, it accounts for
+# every key of the schema, every literal path an applier names is declared for
+# its domain, and nothing a full apply changes in a sandbox falls outside the
+# list.
 
 # _tp_uncovered PATHS — print each target path on stdin no entry covers.
 _tp_uncovered() {
@@ -41,6 +42,7 @@ _tp_undeclared() {
             while ((getline line < paths) > 0) {
                 n = split(line, f, " ")
                 if (n != 3 || f[1] ~ /^#/) continue
+                sub(/\..*/, "", f[1])
                 dom[++c] = f[1]; kind[c] = f[2]; path[c] = f[3]
             }
             # Read or probed, never written.
@@ -75,11 +77,19 @@ t_paths() {
         { print }' "$_tp_paths")
     assert_eq "every paths line is well formed" "$_tp_bad" ""
 
-    # A new section has to say what it writes, even if that is "action".
-    _tp_sections=$(awk '/^[a-z]/ && $1 ~ /\./ { sub(/\..*/, "", $1); print $1 }' \
-        "$RPI_PRESEED_SCHEMA" | sort -u)
-    _tp_domains=$(awk '/^[a-z]/ && $1 != "core" { print $1 }' "$_tp_paths" | sort -u)
-    assert_eq "paths domains are the schema's sections" "$_tp_domains" "$_tp_sections"
+    # A new key has to say what it writes, even if that is "action". A line
+    # naming only a section speaks for all of its keys.
+    _tp_keys=$(awk '/^[a-z]/ && $1 ~ /\./ { sub(/\.\*/, "", $1); print $1 }' "$RPI_PRESEED_SCHEMA" | sort -u)
+    _tp_entries=$(awk '/^[a-z]/ && $1 != "core" { print $1 }' "$_tp_paths" | sort -u)
+    assert_eq "every schema key is declared" "$(printf '%s\n' "$_tp_keys" | while IFS= read -r _tp_k; do
+            printf '%s\n' "$_tp_entries" | grep -qxF -e "$_tp_k" -e "${_tp_k%%.*}" || echo "$_tp_k"
+        done)" ""
+    assert_eq "every paths entry is a schema key or section" "$(printf '%s\n' "$_tp_entries" | while IFS= read -r _tp_k; do
+            printf '%s\n' "$_tp_keys" | sed 's/\..*//' | grep -qxF "$_tp_k" && continue
+            printf '%s\n' "$_tp_keys" | grep -qxF "$_tp_k" || echo "$_tp_k"
+        done)" ""
+    assert_eq "sections declared whole are the expected ones" \
+        "$(printf '%s\n' "$_tp_entries" | grep -v '\.' | paste -sd' ' -)" "packages runcmd users"
 
     _tp_missing=$(for _tp_f in "$RPI_PRESEED_SRCDIR"/apply/*.sh; do
         _tp_d=$(basename "$_tp_f" .sh)
